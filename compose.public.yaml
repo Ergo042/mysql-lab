@@ -14,6 +14,7 @@ services:
       retries: 20
 
   web:
+    image: mysql-lab-web:latest
     build: .
     restart: unless-stopped
     environment:
