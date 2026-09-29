@@ -1,42 +1,95 @@
 # MySQL Lab
 
-供学生练习的 MySQL 网页工作台。界面参考常见数据库客户端的布局，支持手机浏览器。每个浏览器首次进入时会得到独立的示例数据库，预置 `students`、`courses` 和 `enrollments` 三张表；之后可自行创建更多空白数据库。
+MySQL Lab 是面向课堂练习的网页 SQL 工作台。学生可以在浏览器中编写和运行 MySQL 语句，查看查询结果、表结构，并管理自己的数据库。界面适配桌面和手机浏览器，可通过 Docker Compose 部署。
 
-## Docker 部署
+> MySQL 不提供原生网页管理界面。本项目采用常见数据库客户端的工作台布局，并非 MySQL 官方产品。
 
-1. 复制配置：`cp .env.example .env`
-2. 修改 `.env`，设置强随机的 `MYSQL_ROOT_PASSWORD`。如果站点对外开放，也设置 `LAB_ACCESS_CODE`，把练习码发给学生。
-3. 启动：`docker compose up -d --build`
-4. 打开 `http://localhost:3000`。可通过 `WEB_PORT` 修改端口。
+## 功能
 
-停止服务：`docker compose down`。数据库保存在 Docker 卷 `mysql_data` 中；不要使用 `docker compose down -v`，除非确定要删除所有学生数据。
+- **独立练习空间**：首次进入时自动创建专属 MySQL 用户和示例数据库，内含 `students`、`courses`、`enrollments` 三张表。
+- **SQL 工作台**：支持多条 MySQL 语句、结果集切换、表结构浏览、示例查询和本地草稿保存。可按 `Ctrl + Enter`，在 macOS 上按 `⌘ + Enter` 运行。
+- **数据库管理**：学生可创建最多 9 个额外数据库，并在自己的数据库间切换；管理页可查看表结构与数据、生成建表语句、删除表或数据库。
+- **错误提示**：显示 MySQL 错误信息、错误码、可用的行号及中文修改建议。
+- **手机适配**：导航栏收进抽屉，查询结果可横向滚动。
 
-建议通过 HTTPS 反向代理公开网站，并将 `COOKIE_SECURE=true`。不要把 MySQL 容器端口直接暴露到公网。
+学生 SQL 使用其专属 MySQL 账户执行。服务端会校验所选数据库的归属，学生无法通过网页查询其他学生的数据库。
 
-### 通过路由器反向代理公开部署
+## 快速开始
 
-项目包含 [compose.public.yaml](compose.public.yaml)。设置好 `.env` 中的 `MYSQL_ROOT_PASSWORD` 与 `LAB_ACCESS_CODE`，并将 `WEB_PORT` 设为 `28473` 后运行：
+需要 Docker 和 Docker Compose。克隆仓库后，在项目目录执行：
 
 ```bash
+cp .env.example .env
+# 编辑 .env，为 MYSQL_ROOT_PASSWORD 设置强随机密码
+docker compose up -d --build
+```
+
+默认访问地址为 `http://localhost:3000`。修改 `.env` 中的 `WEB_PORT` 可调整端口。第一次启动会初始化 MySQL，可能需要稍等片刻。
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+数据保存在 Docker 卷中。`docker compose down` 会保留数据；`docker compose down -v` 会删除数据库卷及其中的学生数据。
+
+## 通过反向代理部署
+
+公开部署时使用 `compose.public.yaml`。此配置要求设置 `LAB_ACCESS_CODE`，只发布网页端口，MySQL 端口保持在容器网络中。
+
+```bash
+cp .env.example .env
+# 编辑 .env：设置 MYSQL_ROOT_PASSWORD、LAB_ACCESS_CODE 和 WEB_PORT=28473
 docker compose -f compose.public.yaml up -d --build
 ```
 
-此配置在主机的 `28473` 端口监听 HTTP（可用 `WEB_PORT` 修改），MySQL 不发布端口。将路由器反向代理的上游指向 `http://服务器局域网IP:28473`。如果路由器面向浏览器提供 HTTPS，请将 `.env` 中的 `COOKIE_SECURE` 设为 `true`；否则保持 `false`。
+将反向代理的上游指向 `http://服务器局域网IP:28473`，并保留原始 `Host` 请求头。服务器本身无需配置 HTTPS 证书；如果反向代理向浏览器提供 HTTPS，请设置 `COOKIE_SECURE=true`。若浏览器通过 HTTP 访问，则使用 `COOKIE_SECURE=false`。
 
-## 使用方式
+| 环境变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `MYSQL_ROOT_PASSWORD` | MySQL 管理密码，必须设置 | 无 |
+| `LAB_ACCESS_CODE` | 学生进入练习空间时输入的共享练习码；公开部署必须设置 | 空 |
+| `WEB_PORT` | 宿主机网页端口 | 本地配置 `3000`；公开配置 `28473` |
+| `COOKIE_SECURE` | 仅通过 HTTPS 发送会话 Cookie | `false` |
 
-- 输入昵称后创建个人练习空间。设置了 `LAB_ACCESS_CODE` 时还需输入练习码。
-- 在“数据库管理”中创建、切换和删除自己的数据库；每位学生最多可有 1 个示例数据库和 9 个自建数据库。数据库实际名称带学生专属前缀，保证同名练习互不冲突。
-- 管理页面可以查看表结构与数据、删除表，或生成建表语句。SQL 编辑器始终在当前选中的数据库中执行。
-- 点击左侧数据表查看字段；双击表名生成 `SELECT` 查询。
-- 点击“运行查询”或按 `Ctrl + Enter`（Mac 为 `⌘ + Enter`）执行 SQL。支持多条语句，结果按页签显示。
-- SQL 出错时显示 MySQL 错误信息、错误码、行号（如果 MySQL 提供）和中文修改建议。
-- 左侧“快速开始”提供查询、连接和分组示例。编辑器草稿保存在浏览器本地。
-- “重置示例数据库”只恢复默认的示例数据库，不影响自建数据库。
-- 查询结果最多显示 500 行；大查询请使用 `LIMIT`。单次 SQL 最长 20,000 字符。
+## 学生使用说明
 
-练习空间通过浏览器 Cookie 识别。清除 Cookie 后不能自动找回原数据库，重新进入会创建新的空间。这个版本适合课堂和练习环境，没有教师账号、正式学生认证或作业评分功能。
+1. 输入昵称；如果站点启用了练习码，再输入老师提供的练习码，创建练习空间。
+2. 从左侧选择数据库与数据表，或在“数据库管理”中创建自己的数据库。新数据库为空白，不含示例表。
+3. 在编辑器中输入 SQL，点击“运行查询”。结果和错误提示显示在编辑器下方。
+4. 如需恢复示例数据，使用“重置示例数据库”。此操作只影响默认示例数据库，不影响自建数据库。
 
-## 技术说明
+数据库实际名称包含学生专属前缀，确保不同学生使用相同的自定义名称时互不冲突。每位学生最多拥有 1 个默认数据库和 9 个自建数据库。单次 SQL 最长 20,000 字符；每个结果集最多显示前 500 行。较大的查询建议使用 `LIMIT`。
 
-`web` 是 Node.js 服务，`db` 使用 MySQL 8.4。服务端用管理账户创建学生数据库及专属 MySQL 用户；学生 SQL 仅用其专属账户执行，请求的数据库还会通过归属记录校验。升级时会自动为已有学生补齐默认数据库记录。MySQL 本身没有自带的网页 UI，因此这里采用数据库工作台风格，而不是声称复刻不存在的原生界面。
+## 数据与访问边界
+
+练习空间通过当前浏览器的 Cookie 识别。清除 Cookie 后无法自动找回原空间，重新进入会创建新的空间。`LAB_ACCESS_CODE` 是共享课堂练习码，不等同于学生账号认证。本项目适合课堂与练习环境，目前不提供教师后台、正式身份认证、作业评分或存储配额。
+
+服务端使用管理账户创建数据库和学生账户；管理账户密码保存在部署端的 `.env` 文件中，不写入源码。每位学生的 SQL 使用独立的 MySQL 账户执行，权限仅授予其拥有的数据库。请勿将 MySQL 容器端口直接发布到公网。
+
+## 备份与升级
+
+生产环境更新前，可备份全部 MySQL 数据库：
+
+```bash
+docker compose -f compose.public.yaml exec -T db sh -c \
+  'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot --all-databases --single-transaction --routines --triggers' \
+  | gzip > mysql-lab-backup.sql.gz
+```
+
+拉取新代码后，使用相同的 Compose 文件重新构建并启动。不要删除 `.env` 或数据库卷。应用会在启动时补齐旧学生的数据库归属记录。
+
+## 项目结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `server.js` | HTTP API、学生空间、数据库隔离与 MySQL 查询 |
+| `public/` | 网页界面及手机适配样式 |
+| `compose.yaml` | 本地 Docker Compose 配置 |
+| `compose.public.yaml` | 反向代理场景的 Docker Compose 配置 |
+| `.env.example` | 环境变量示例 |
+
+## 开源协议
+
+本项目采用 [MIT License](LICENSE)。

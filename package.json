@@ -2,6 +2,8 @@
   "name": "mysql-lab",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
+  "repository": "https://github.com/Ergo042/mysql-lab",
   "type": "module",
   "scripts": {
     "start": "node server.js",
