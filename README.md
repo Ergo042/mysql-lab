@@ -13,15 +13,15 @@
 
 建议通过 HTTPS 反向代理公开网站，并将 `COOKIE_SECURE=true`。不要把 MySQL 容器端口直接暴露到公网。
 
-### 在 zhuhome.top 公开部署
+### 通过路由器反向代理公开部署
 
-项目包含 [compose.public.yaml](compose.public.yaml) 和 [Caddyfile](Caddyfile)。设置好 `.env` 中的 `MYSQL_ROOT_PASSWORD` 与 `LAB_ACCESS_CODE` 后运行：
+项目包含 [compose.public.yaml](compose.public.yaml)。设置好 `.env` 中的 `MYSQL_ROOT_PASSWORD` 与 `LAB_ACCESS_CODE`，并将 `WEB_PORT` 设为 `28473` 后运行：
 
 ```bash
 docker compose -f compose.public.yaml up -d --build
 ```
 
-此配置在主机上监听 80/443，Caddy 自动为 `zhuhome.top` 申请 HTTPS 证书；网页与 MySQL 不直接发布端口。需要域名指向该服务器且外部网络允许访问 80/443，证书才能成功签发。
+此配置在主机的 `28473` 端口监听 HTTP（可用 `WEB_PORT` 修改），MySQL 不发布端口。将路由器反向代理的上游指向 `http://服务器局域网IP:28473`。如果路由器面向浏览器提供 HTTPS，请将 `.env` 中的 `COOKIE_SECURE` 设为 `true`；否则保持 `false`。
 
 ## 使用方式
 

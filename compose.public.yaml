@@ -21,25 +21,12 @@ services:
       MYSQL_HOST: db
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
       LAB_ACCESS_CODE: ${LAB_ACCESS_CODE:?Set LAB_ACCESS_CODE in .env}
-      COOKIE_SECURE: "true"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "0.0.0.0:${WEB_PORT:-28473}:3000"
     depends_on:
       db:
         condition: service_healthy
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
-
 volumes:
   mysql_data:
-  caddy_data:
-  caddy_config:
