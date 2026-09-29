@@ -8,11 +8,20 @@ const snippets = {
 let student = null;
 let lastSets = [];
 let toastTimer;
+let databases = [];
+let activeDatabase = null;
+let currentView = 'workspace';
 
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', headers: { 'content-type': 'application/json' }, ...options });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data.error || `请求失败 (${response.status})`);
+    error.code = data.code;
+    error.hint = data.hint;
+    error.line = data.line;
+    throw error;
+  }
   return data;
 }
 function toast(message) {
@@ -31,9 +40,11 @@ function setStudent(value) {
   $('#welcomeModal').hidden = !!value;
   $('#headerName').textContent = value?.name || '访客';
   $('#avatar').textContent = (value?.name || 'S').slice(0, 1).toUpperCase();
-  $('#headerDatabase').textContent = value?.database || '准备就绪';
-  $('#sidebarDatabase').textContent = value?.database || '—';
-  if (value) refreshSchema();
+  if (value) {
+    try { activeDatabase = localStorage.getItem(`mysql-lab-database-${value.database}`) || value.database; }
+    catch { activeDatabase = value.database; }
+    refreshDatabases();
+  }
 }
 function closeSidebar() {
   $('#sidebar').classList.remove('open');
@@ -46,14 +57,101 @@ function addText(parent, tag, value, className) {
   parent.append(node);
   return node;
 }
-async function refreshSchema() {
+function showView(view) {
+  currentView = view;
+  $('#workspaceView').hidden = view !== 'workspace';
+  $('#manageView').hidden = view !== 'manage';
+  $('#navWorkspace').classList.toggle('active', view === 'workspace');
+  $('#navManage').classList.toggle('active', view === 'manage');
+  $('#breadcrumbCurrent').textContent = view === 'workspace' ? 'SQL 查询' : '数据库管理';
+  $('#pageHeading').textContent = view === 'workspace' ? 'SQL 工作台' : '数据库管理';
+  $('#pageDescription').textContent = view === 'workspace' ? '写下你的查询，探索数据背后的答案。' : '创建数据库、浏览数据表，整理你的练习空间。';
+  closeSidebar();
+}
+function databaseLabel(database) { return database?.isDefault ? '示例数据库' : database?.name || '数据库'; }
+function renderDatabases() {
+  const side = $('#databaseList');
+  const cards = $('#databaseCards');
+  side.textContent = '';
+  cards.textContent = '';
+  for (const database of databases) {
+    const selected = database.databaseName === activeDatabase;
+    const choice = document.createElement('button');
+    choice.type = 'button';
+    choice.className = `database-choice${selected ? ' active' : ''}`;
+    addText(choice, 'span', '▤', 'db-icon');
+    addText(choice, 'span', databaseLabel(database), 'database-name');
+    if (selected) addText(choice, 'span', '✓', 'database-check');
+    choice.title = database.databaseName;
+    choice.addEventListener('click', () => switchDatabase(database.databaseName));
+    side.append(choice);
+
+    const card = addText(cards, 'div', '', `database-card${selected ? ' active' : ''}`);
+    const top = addText(card, 'div', '', 'database-card-top');
+    addText(top, 'span', '▤', 'database-card-icon');
+    const info = addText(top, 'div', '');
+    addText(info, 'h3', databaseLabel(database));
+    addText(info, 'p', database.databaseName);
+    const actions = addText(card, 'div', '', 'database-card-actions');
+    const switchButton = addText(actions, 'button', selected ? '当前使用' : '切换使用', 'small-action');
+    switchButton.disabled = selected;
+    switchButton.addEventListener('click', () => switchDatabase(database.databaseName));
+    if (!database.isDefault) {
+      const remove = addText(actions, 'button', '删除数据库', 'small-action danger');
+      remove.addEventListener('click', () => removeDatabase(database));
+    }
+  }
+  $('#headerDatabase').textContent = activeDatabase || '准备就绪';
+  $('#editorDatabase').textContent = activeDatabase || '—';
+  $('#manageTableDescription').textContent = `当前数据库：${activeDatabase || '—'}`;
+}
+async function refreshDatabases(preferred) {
   if (!student) return;
+  try {
+    const data = await api('/api/databases');
+    databases = data.databases;
+    const wanted = preferred || activeDatabase;
+    activeDatabase = databases.some(db => db.databaseName === wanted) ? wanted : student.database;
+    try { localStorage.setItem(`mysql-lab-database-${student.database}`, activeDatabase); } catch {}
+    renderDatabases();
+    await refreshSchema();
+  } catch (error) { toast(`读取数据库失败：${error.message}`); }
+}
+async function switchDatabase(databaseName) {
+  if (activeDatabase === databaseName) return closeSidebar();
+  activeDatabase = databaseName;
+  try { localStorage.setItem(`mysql-lab-database-${student.database}`, databaseName); } catch {}
+  renderDatabases();
+  await refreshSchema();
+  closeSidebar();
+  toast('已切换数据库');
+}
+function openDatabaseModal() {
+  if (!student) return setStudent(null);
+  $('#databaseFormError').textContent = '';
+  $('#databaseName').value = '';
+  $('#databaseModal').hidden = false;
+  $('#databaseName').focus();
+  closeSidebar();
+}
+async function removeDatabase(database) {
+  const typed = prompt(`删除“${database.name}”会永久删除其中所有表和数据。请输入 ${database.name} 确认：`);
+  if (typed !== database.name) return;
+  try {
+    await api('/api/databases/delete', { method: 'POST', body: JSON.stringify({ database: database.databaseName }) });
+    await refreshDatabases(activeDatabase === database.databaseName ? student.database : activeDatabase);
+    toast('数据库已删除');
+  } catch (error) { toast(`删除失败：${error.message}`); }
+}
+async function refreshSchema() {
+  if (!student || !activeDatabase) return;
   const list = $('#tableList');
   list.textContent = '';
   addText(list, 'div', '正在读取表结构…', 'empty-tables');
   try {
-    const { tables } = await api('/api/schema');
+    const { tables } = await api(`/api/schema?database=${encodeURIComponent(activeDatabase)}`);
     list.textContent = '';
+    renderTableCards(tables);
     if (!tables.length) addText(list, 'div', '还没有数据表，可使用 CREATE TABLE 创建', 'empty-tables');
     for (const table of tables) {
       const button = document.createElement('button');
@@ -87,7 +185,39 @@ async function refreshSchema() {
   } catch (error) {
     list.textContent = '';
     addText(list, 'div', error.message, 'empty-tables');
+    renderTableCards([]);
   }
+}
+function renderTableCards(tables) {
+  const cards = $('#tableCards');
+  cards.textContent = '';
+  if (!tables.length) return addText(cards, 'div', '这个数据库还没有数据表。点击“创建表”开始。', 'manage-empty');
+  for (const table of tables) {
+    const card = addText(cards, 'div', '', 'table-card');
+    addText(card, 'h3', `▦  ${table.name}`);
+    addText(card, 'p', `${table.rows} 行 · ${table.columns.length} 个字段`);
+    const columns = addText(card, 'div', '', 'table-columns');
+    for (const column of table.columns.slice(0, 6)) addText(columns, 'span', column.name, 'column-pill');
+    const actions = addText(card, 'div', '', 'table-card-actions');
+    const view = addText(actions, 'button', '查看数据', 'small-action');
+    view.addEventListener('click', () => loadTableSql(table.name, 'SELECT * FROM'));
+    const describe = addText(actions, 'button', '查看结构', 'small-action');
+    describe.addEventListener('click', () => loadTableSql(table.name, 'DESCRIBE'));
+    const remove = addText(actions, 'button', '删除表', 'small-action danger');
+    remove.addEventListener('click', async () => {
+      if (!confirm(`确定永久删除数据表“${table.name}”及其中所有数据吗？`)) return;
+      try {
+        await api('/api/query', { method: 'POST', body: JSON.stringify({ database: activeDatabase, sql: `DROP TABLE \`${table.name.replaceAll('`', '``')}\`` }) });
+        await refreshSchema();
+        toast('数据表已删除');
+      } catch (error) { toast(`删除失败：${error.message}`); }
+    });
+  }
+}
+function loadTableSql(tableName, command) {
+  const quoted = `\`${tableName.replaceAll('`', '``')}\``;
+  editor.value = command === 'DESCRIBE' ? `DESCRIBE ${quoted};` : `SELECT * FROM ${quoted} LIMIT 100;`;
+  syncLines(); saveDraft(); showView('workspace'); runQuery();
 }
 function saveDraft() {
   try { localStorage.setItem('mysql-lab-draft', editor.value); } catch {}
@@ -130,7 +260,8 @@ function showSet(index) {
   body.append(table);
   if (set.truncated) addText(body, 'div', `仅显示前 500 行，共 ${set.total} 行。请使用 LIMIT 缩小查询范围。`, 'result-note');
 }
-function showError(message) {
+function showError(error) {
+  const message = error.message || String(error);
   lastSets = [];
   $('#resultTabs').hidden = true;
   $('#resultCount').textContent = '执行失败';
@@ -141,6 +272,10 @@ function showError(message) {
   addText(wrap, 'div', '!', 'state-symbol');
   addText(wrap, 'strong', 'SQL 执行失败');
   addText(wrap, 'p', message);
+  $('#editorError').hidden = false;
+  $('#editorErrorTitle').textContent = `SQL 执行失败${error.line ? ` · 第 ${error.line} 行` : ''}${error.code ? ` · ${error.code}` : ''}`;
+  $('#editorErrorMessage').textContent = message;
+  $('#editorErrorHint').textContent = error.hint || '检查 SQL 语句和当前数据库后重试。';
 }
 async function runQuery() {
   if (!student) return setStudent(null);
@@ -150,8 +285,9 @@ async function runQuery() {
   button.disabled = true;
   button.querySelector('span:nth-child(2)').textContent = '运行中…';
   $('#resultCount').textContent = '正在查询';
+  $('#editorError').hidden = true;
   try {
-    const { sets, durationMs } = await api('/api/query', { method: 'POST', body: JSON.stringify({ sql }) });
+    const { sets, durationMs } = await api('/api/query', { method: 'POST', body: JSON.stringify({ sql, database: activeDatabase }) });
     lastSets = sets;
     $('#resultMeta').textContent = `${durationMs} ms · 执行成功`;
     const tabs = $('#resultTabs');
@@ -163,7 +299,7 @@ async function runQuery() {
     });
     showSet(0);
     refreshSchema();
-  } catch (error) { showError(error.message); }
+  } catch (error) { showError(error); }
   finally {
     button.disabled = false;
     button.querySelector('span:nth-child(2)').textContent = '运行查询';
@@ -183,8 +319,37 @@ $('#welcomeForm').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 $('#runQuery').addEventListener('click', runQuery);
+$('#dismissError').addEventListener('click', () => { $('#editorError').hidden = true; });
 $('#clearEditor').addEventListener('click', () => { editor.value = ''; syncLines(); saveDraft(); editor.focus(); });
-$('#refreshSchema').addEventListener('click', refreshSchema);
+$('#refreshSchema').addEventListener('click', () => refreshDatabases());
+$('#navWorkspace').addEventListener('click', () => showView('workspace'));
+$('#navManage').addEventListener('click', () => showView('manage'));
+$('#sidebarAddDatabase').addEventListener('click', openDatabaseModal);
+$('#createDatabase').addEventListener('click', openDatabaseModal);
+$('#cancelDatabase').addEventListener('click', () => { $('#databaseModal').hidden = true; });
+$('#databaseModal').addEventListener('click', event => { if (event.target === $('#databaseModal')) $('#databaseModal').hidden = true; });
+$('#databaseForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('#saveDatabase');
+  button.disabled = true;
+  $('#databaseFormError').textContent = '';
+  try {
+    const { database } = await api('/api/databases', { method: 'POST', body: JSON.stringify({ name: $('#databaseName').value }) });
+    $('#databaseModal').hidden = true;
+    await refreshDatabases(database.databaseName);
+    showView('manage');
+    toast('数据库已创建并切换');
+  } catch (error) { $('#databaseFormError').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('#createTable').addEventListener('click', () => {
+  const name = prompt('输入新表名称（以字母开头，只使用字母、数字和下划线）：');
+  if (name === null) return;
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(name)) return toast('表名格式不正确');
+  editor.value = `CREATE TABLE \`${name}\` (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n);`;
+  syncLines(); saveDraft(); showView('workspace'); editor.focus();
+  toast('建表语句已载入，确认后运行即可');
+});
 $('#resetDatabase').addEventListener('click', async () => {
   if (!student || !confirm('确定重置你的数据库吗？你创建的表和修改的数据都会被删除。')) return;
   const button = $('#resetDatabase');
