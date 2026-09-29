@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f8fb">
+  <title>MySQL Lab · SQL 练习空间</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark"><span></span><span></span><span></span></div><span>MySQL <b>Lab</b></span><span class="brand-tag">STUDENT EDITION</span></div>
+      <div class="topbar-center"><span class="online-dot"></span><span>本地练习环境</span><span class="topbar-divider"></span><span id="headerDatabase">准备就绪</span></div>
+      <div class="topbar-actions"><button class="icon-button mobile-only" id="mobileSchema" aria-label="打开数据库结构" title="数据库结构">☷</button><div class="avatar" id="avatar">S</div><span class="user-name" id="headerName">访客</span></div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-heading"><span>导航</span><button class="icon-button mobile-only" id="closeSchema" aria-label="关闭导航">×</button></div>
+        <button class="nav-item active" id="navWorkspace"><span class="nav-icon">▦</span> SQL 工作台 <span class="nav-chevron">›</span></button>
+        <div class="sidebar-section"><div class="section-label">数据库结构 <button class="refresh-button" id="refreshSchema" title="刷新表结构" aria-label="刷新表结构">↻</button></div><div class="database-row"><span class="db-icon">▤</span><span id="sidebarDatabase">—</span><span class="tiny-chevron">⌄</span></div><div class="tables" id="tableList"><div class="empty-tables">创建空间后显示数据表</div></div></div>
+        <div class="sidebar-section snippets-section"><div class="section-label">快速开始</div><button class="snippet" data-snippet="select"><span class="snippet-icon blue">⌕</span><span>查询数据</span><span class="snippet-arrow">↗</span></button><button class="snippet" data-snippet="join"><span class="snippet-icon purple">⋈</span><span>多表连接</span><span class="snippet-arrow">↗</span></button><button class="snippet" data-snippet="group"><span class="snippet-icon orange">▥</span><span>分组统计</span><span class="snippet-arrow">↗</span></button></div>
+        <button class="reset-link" id="resetDatabase">↺ &nbsp;重置示例数据库</button><div class="sidebar-bottom"><div class="tip-icon">✦</div><div><strong>边写边学</strong><p>尝试修改示例查询，看看结果如何变化。</p></div></div>
+      </aside>
+      <div class="scrim" id="scrim"></div>
+
+      <main class="main">
+        <div class="breadcrumbs">工作台 <span>›</span> <strong>SQL 查询</strong></div>
+        <div class="page-title"><div><div class="eyebrow">YOUR WORKSPACE</div><h1>SQL 工作台</h1><p>写下你的查询，探索数据背后的答案。</p></div><div class="environment-badge"><span class="badge-pulse"></span> MySQL 8.4 <span class="badge-separator"></span> 已连接</div></div>
+
+        <section class="editor-card" aria-labelledby="editorHeading">
+          <div class="card-head"><div class="card-title"><span class="card-title-icon">⌘</span><div><h2 id="editorHeading">查询编辑器</h2><span>在下方编写 MySQL 语句</span></div></div><div class="editor-actions"><span class="shortcut">Ctrl + Enter 运行</span><button id="clearEditor" class="subtle-button" title="清空编辑器">清空</button></div></div>
+          <div class="editor-tabs"><button class="editor-tab active"><span class="tab-dot"></span> query.sql</button><span class="unsaved-dot" title="本地草稿自动保存"></span></div>
+          <div class="code-area"><div class="line-numbers" id="lineNumbers">1</div><textarea id="sqlEditor" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="SQL 编辑器">SELECT s.name AS 学生, c.name AS 课程, e.score AS 成绩
+FROM students s
+JOIN enrollments e ON e.student_id = s.id
+JOIN courses c ON c.id = e.course_id
+ORDER BY e.score DESC;</textarea></div>
+          <div class="editor-footer"><div class="editor-hint"><span class="hint-light">●</span> 支持 SELECT、INSERT、UPDATE、CREATE 等常用 MySQL 语句</div><button class="run-button" id="runQuery"><span class="play-icon">▶</span><span>运行查询</span><span class="button-shortcut">↵</span></button></div>
+        </section>
+
+        <section class="results-card" aria-labelledby="resultsHeading"><div class="results-head"><div class="results-title"><span class="results-icon">▤</span><h2 id="resultsHeading">查询结果</h2><span class="result-count" id="resultCount">等待运行</span></div><div class="result-meta" id="resultMeta"></div></div><div class="result-tabs" id="resultTabs" hidden></div><div class="result-body" id="resultBody"><div class="result-placeholder"><div class="placeholder-art"><span>⌘</span><span class="art-spark">✧</span></div><strong>准备好探索数据了吗？</strong><p>点击“运行查询”，结果就会出现在这里。</p></div></div></section>
+
+        <div class="bottom-grid"><section class="mini-card"><div class="mini-heading"><span class="mini-icon violet">⌁</span><h3>常用快捷键</h3></div><div class="key-row"><span>运行 SQL</span><span><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span></div><div class="key-row"><span>缩进</span><span><kbd>Tab</kbd></span></div></section><section class="mini-card"><div class="mini-heading"><span class="mini-icon amber">✦</span><h3>小提示</h3></div><p>你的数据库与其他同学互相独立。大胆尝试，每一次运行都是一次学习。</p></section></div>
+        <footer class="page-footer">MySQL Lab <span>·</span> 为探索而设计的练习空间</footer>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="welcomeModal" hidden><div class="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle"><div class="welcome-icon">▤</div><div class="welcome-eyebrow">WELCOME TO MYSQL LAB</div><h2 id="welcomeTitle">开始你的 SQL 练习</h2><p>输入昵称，我们会为你创建专属的 MySQL 数据库，并准备好示例数据。</p><form id="welcomeForm"><label for="studentName">你的昵称</label><input id="studentName" name="name" maxlength="24" placeholder="例如：小林" required autofocus><div id="accessCodeField" hidden><label for="accessCode">练习码</label><input id="accessCode" name="accessCode" autocomplete="off" placeholder="输入老师提供的练习码"></div><button type="submit" id="startButton">进入工作台 <span>→</span></button><div class="form-error" id="formError" role="alert"></div></form><div class="welcome-note">练习空间保存在当前浏览器中，请不要清除本站 Cookie。</div></div></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
