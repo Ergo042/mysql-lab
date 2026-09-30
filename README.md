@@ -90,6 +90,35 @@ docker compose -f compose.public.yaml exec -T db sh -c \
 | `compose.public.yaml` | 反向代理场景的 Docker Compose 配置 |
 | `.env.example` | 环境变量示例 |
 
+## Android 一体 APK（实验版）
+
+`app/` 是 Android 启动器。APK 内含网页版前端、Node 后端源码，以及 ARM64 和 x86_64 的 PRoot 程序。普通构建首次启动时会下载经 SHA-256 校验的 Ubuntu 24.04 基础系统和 Node.js 22，在 PRoot 中安装真正的 MySQL 8.0。ARM64 离线构建预先内置完整环境，手机首次启动只校验、解压和设置本机数据库密码，不运行 APT、dpkg 或 npm。两种构建都会启动仅监听 `127.0.0.1` 的 MySQL 和网页服务，WebView 打开 `http://127.0.0.1:3000`。之后的数据保存在应用私有目录，重新打开应用不会重新安装。卸载应用或清除应用数据会删除练习数据库。
+
+首次下载 Ubuntu 基础系统优先使用阿里云镜像，Node.js 优先使用南京大学镜像，两者都保留官方地址作为下载备选，并校验 SHA-256。APT 默认使用阿里云：ARM64 选择 `ubuntu-ports`，x86_64 选择 `ubuntu`；网页依赖使用 npmmirror。Ubuntu Base 初始环境没有 CA 证书，因此 APT 镜像使用 HTTP 完成首次安装，同时由 Ubuntu 仓库签名和软件包哈希校验内容。应用右上角或手机底栏的“设置”可切换阿里云、清华大学和 Ubuntu 官方 APT 软件源，也可调整文字大小。更换软件源会写入现有 Ubuntu 环境，后续安装及更新生效；不会删除练习数据。
+
+普通构建首次启动需要联网，建议使用 Wi-Fi。离线构建首次启动无需下载软件包，但解压期间需要足够存储空间。运行时会显示一条“本地 MySQL 服务”通知。APK 支持 ARM64 手机；仓库附带 x86_64 PRoot，供模拟器调试。Android 版本最低为 8.0（API 26）。目前 APK 的 `targetSdk` 为 28，以允许 PRoot 执行应用私有目录中的 Linux 程序；这是本地安装的实验构建，不适合直接发布到应用商店。
+
+如果首次安装中断，应用会检测未完成的 `dpkg` 状态并尝试恢复。启动页的“查看安装日志”可查看和复制最近 16 KB 的 `runtime.log`，便于定位不同手机上的安装错误。升级 APK 不会清除原有应用数据；请勿为了重试直接清除数据。
+
+在装有 Android Studio、JDK 17 和 Android SDK 34 的电脑上构建：
+
+```powershell
+# 已包含 PRoot 文件；需要重新获取时运行以下命令
+python scripts/prepare_proot.py
+
+.\gradlew.bat assembleDebug
+```
+
+可安装的调试包位于 `app/build/outputs/apk/debug/app-debug.apk`。连接手机或模拟器后执行：
+
+```powershell
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+离线 ARM64 包的构建方式见 [prebuilt/README.md](prebuilt/README.md)。仓库的 `Build offline ARM64 APK` GitHub Actions 工作流使用 ARM64 Ubuntu 虚拟机预装环境，再把环境嵌入 APK。Android CLI 可管理 SDK、模拟器和安装 APK；在 x86_64 Windows 主机上运行 ARM64 Android 模拟器无法使用虚拟化加速，因此 ARM64 环境构建放在 ARM64 虚拟机中。
+
+已在 Android 14 的 Pixel 8 x86_64 模拟器中验证 APK 安装、首次初始化、创建练习空间、执行 `SELECT VERSION()`（返回 MySQL 8.0.46）和重启后读取原练习空间。也已在 Android 16 的 ARM64 真机上验证首次初始化、网页界面、创建练习空间，以及通过应用后端执行 `SELECT VERSION()`（返回 MySQL 8.0.46）。真机使用系统当前网络提供的 DNS 完成 Ubuntu 软件包安装。PRoot 和依赖库的来源及许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
 ## 开源协议
 
 本项目采用 [MIT License](LICENSE)。

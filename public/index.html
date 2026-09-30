@@ -7,13 +7,14 @@
   <title>MySQL Lab · SQL 练习空间</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/mobile.css">
 </head>
 <body>
   <div class="app" id="app">
     <header class="topbar">
       <div class="brand"><div class="brand-mark"><span></span><span></span><span></span></div><span>MySQL <b>Lab</b></span><span class="brand-tag">STUDENT EDITION</span></div>
       <div class="topbar-center"><span class="online-dot"></span><span>本地练习环境</span><span class="topbar-divider"></span><span id="headerDatabase">准备就绪</span></div>
-      <div class="topbar-actions"><button class="icon-button mobile-only" id="mobileSchema" aria-label="打开数据库结构" title="数据库结构">☷</button><div class="avatar" id="avatar">S</div><span class="user-name" id="headerName">访客</span></div>
+      <div class="topbar-actions"><button class="icon-button mobile-only" id="mobileSchema" aria-label="打开数据库结构" title="数据库结构">☷</button><button class="icon-button settings-button" type="button" aria-label="应用设置" title="应用设置">⚙</button><div class="avatar" id="avatar">S</div><span class="user-name" id="headerName">访客</span></div>
     </header>
 
     <div class="workspace">
@@ -52,6 +53,7 @@ ORDER BY e.score DESC;</textarea></div>
         <footer class="page-footer">MySQL Lab <span>·</span> 为探索而设计的练习空间</footer>
       </main>
     </div>
+    <nav class="mobile-nav" aria-label="主要导航"><button id="mobileWorkspace" class="active" type="button"><span>⌘</span>SQL 工作台</button><button id="mobileManage" type="button"><span>▤</span>数据库</button><button id="mobileSettings" type="button"><span>⚙</span>设置</button></nav>
   </div>
 
   <div class="modal-backdrop" id="welcomeModal" hidden><div class="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle"><div class="welcome-icon">▤</div><div class="welcome-eyebrow">WELCOME TO MYSQL LAB</div><h2 id="welcomeTitle">开始你的 SQL 练习</h2><p>输入昵称，我们会为你创建专属的 MySQL 数据库，并准备好示例数据。</p><form id="welcomeForm"><label for="studentName">你的昵称</label><input id="studentName" name="name" maxlength="24" placeholder="例如：小林" required autofocus><div id="accessCodeField" hidden><label for="accessCode">练习码</label><input id="accessCode" name="accessCode" autocomplete="off" placeholder="输入老师提供的练习码"></div><button type="submit" id="startButton">进入工作台 <span>→</span></button><div class="form-error" id="formError" role="alert"></div></form><div class="welcome-note">练习空间保存在当前浏览器中，请不要清除本站 Cookie。</div></div></div>

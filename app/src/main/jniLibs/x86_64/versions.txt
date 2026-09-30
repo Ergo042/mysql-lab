@@ -1,0 +1,4 @@
+proot=5.1.107.95
+libtalloc=2.4.3
+libandroid-shmem=0.7
+libc++=30

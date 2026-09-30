@@ -63,6 +63,8 @@ function showView(view) {
   $('#manageView').hidden = view !== 'manage';
   $('#navWorkspace').classList.toggle('active', view === 'workspace');
   $('#navManage').classList.toggle('active', view === 'manage');
+  $('#mobileWorkspace').classList.toggle('active', view === 'workspace');
+  $('#mobileManage').classList.toggle('active', view === 'manage');
   $('#breadcrumbCurrent').textContent = view === 'workspace' ? 'SQL 查询' : '数据库管理';
   $('#pageHeading').textContent = view === 'workspace' ? 'SQL 工作台' : '数据库管理';
   $('#pageDescription').textContent = view === 'workspace' ? '写下你的查询，探索数据背后的答案。' : '创建数据库、浏览数据表，整理你的练习空间。';
@@ -324,6 +326,11 @@ $('#clearEditor').addEventListener('click', () => { editor.value = ''; syncLines
 $('#refreshSchema').addEventListener('click', () => refreshDatabases());
 $('#navWorkspace').addEventListener('click', () => showView('workspace'));
 $('#navManage').addEventListener('click', () => showView('manage'));
+$('#mobileWorkspace').addEventListener('click', () => showView('workspace'));
+$('#mobileManage').addEventListener('click', () => showView('manage'));
+function openAppSettings() { if (window.Android?.openSettings) window.Android.openSettings(); }
+$('#mobileSettings').addEventListener('click', openAppSettings);
+$('.settings-button').addEventListener('click', openAppSettings);
 $('#sidebarAddDatabase').addEventListener('click', openDatabaseModal);
 $('#createDatabase').addEventListener('click', openDatabaseModal);
 $('#cancelDatabase').addEventListener('click', () => { $('#databaseModal').hidden = true; });

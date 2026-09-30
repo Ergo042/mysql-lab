@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'dev.ergolab.mysqllab'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'dev.ergolab.mysqllab'
+        minSdk 26
+        // PRoot runs Linux ELF files from the app's private data directory.
+        // Android 10's W^X restriction blocks that for targetSdk >= 29.
+        targetSdk 28
+        versionCode 5
+        versionName '0.3.0'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+
+    packagingOptions {
+        jniLibs.useLegacyPackaging = true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+def generatedAssets = layout.buildDirectory.dir('generated/runtimeAssets')
+tasks.register('stageSite', Sync) {
+    from(rootProject.file('server.js')) { into 'site' }
+    from(rootProject.file('package.json')) { into 'site' }
+    from(rootProject.file('package-lock.json')) { into 'site' }
+    from(rootProject.file('public')) { into 'site/public' }
+    from(rootProject.file('prebuilt')) {
+        into 'runtime'
+        include 'arm64-rootfs.tar.gz', 'arm64-rootfs.sha256'
+    }
+    into(generatedAssets)
+    doFirst {
+        if (project.hasProperty('requireArm64Bundle')) {
+            def bundle = rootProject.file('prebuilt/arm64-rootfs.tar.gz')
+            def checksum = rootProject.file('prebuilt/arm64-rootfs.sha256')
+            if (!bundle.isFile() || !checksum.isFile()) {
+                throw new GradleException('ARM64 offline bundle is missing; run scripts/build_arm64_bundle.sh first')
+            }
+        }
+    }
+}
+android.sourceSets.main.assets.srcDir(generatedAssets)
+tasks.named('preBuild').configure { dependsOn('stageSite') }

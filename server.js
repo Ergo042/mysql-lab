@@ -185,9 +185,9 @@ async function resetStudent(student) {
 }
 async function staticFile(req, res, pathname) {
   const filename = pathname === '/' ? 'index.html' : pathname.slice(1);
-  if (!/^(index\.html|style\.css|app\.js|favicon\.svg)$/.test(filename)) return error(res, 404, '页面不存在');
+  if (!/^(index\.html|style\.css|mobile\.css|app\.js|favicon\.svg)$/.test(filename)) return error(res, 404, '页面不存在');
   const file = await readFile(path.join(publicDir, filename));
-  res.writeHead(200, { 'content-type': mime[path.extname(filename)], 'content-length': file.length, 'cache-control': filename === 'index.html' ? 'no-cache' : 'public, max-age=3600' });
+  res.writeHead(200, { 'content-type': mime[path.extname(filename)], 'content-length': file.length, 'cache-control': 'no-store' });
   res.end(file);
 }
 async function handler(req, res) {
@@ -292,6 +292,7 @@ async function init() {
   await admin.query(`CREATE TABLE IF NOT EXISTS ${META_DB}.students (id CHAR(16) PRIMARY KEY, display_name VARCHAR(24) NOT NULL, db_name VARCHAR(32) NOT NULL UNIQUE, db_user VARCHAR(32) NOT NULL UNIQUE, db_password VARCHAR(64) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   await admin.query(`CREATE TABLE IF NOT EXISTS ${META_DB}.student_databases (student_id CHAR(16) NOT NULL, db_name VARCHAR(64) NOT NULL UNIQUE, display_name VARCHAR(24) NOT NULL, is_default BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (student_id, db_name), UNIQUE KEY student_name (student_id, display_name), FOREIGN KEY (student_id) REFERENCES ${META_DB}.students(id) ON DELETE CASCADE)`);
   await admin.query(`INSERT IGNORE INTO ${META_DB}.student_databases (student_id, db_name, display_name, is_default) SELECT id, db_name, '示例数据库', 1 FROM ${META_DB}.students`);
-  http.createServer(handler).listen(PORT, '0.0.0.0', () => console.log(`MySQL Lab listening on ${PORT}`));
+  const listenHost = process.env.LISTEN_HOST || '0.0.0.0';
+  http.createServer(handler).listen(PORT, listenHost, () => console.log(`MySQL Lab listening on ${listenHost}:${PORT}`));
 }
 init().catch(error => { console.error(error); process.exit(1); });

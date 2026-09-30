@@ -1,0 +1,67 @@
+name: Build offline ARM64 APK
+
+on:
+  push:
+    branches:
+      - android-offline-arm64
+  workflow_dispatch:
+
+jobs:
+  build-rootfs:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install ARM64 bundle tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap
+      - name: Build native ARM64 Ubuntu, MySQL and Node bundle
+        env:
+          UBUNTU_ARM64_MIRROR: http://ports.ubuntu.com/ubuntu-ports/
+        run: bash scripts/build_arm64_bundle.sh
+      - name: Upload ARM64 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-rootfs
+          path: |
+            prebuilt/arm64-rootfs.tar.gz
+            prebuilt/arm64-rootfs.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  build-apk:
+    needs: build-rootfs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: arm64-rootfs
+          path: prebuilt
+      - name: Verify downloaded bundle
+        run: |
+          cd prebuilt
+          echo "$(cat arm64-rootfs.sha256)  arm64-rootfs.tar.gz" | sha256sum -c -
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 34
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Build APK with embedded ARM64 environment
+        run: bash gradlew assembleDebug -PrequireArm64Bundle
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-lab-offline-arm64-fresh-install-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
