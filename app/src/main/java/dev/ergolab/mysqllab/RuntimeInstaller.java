@@ -174,7 +174,7 @@ final class RuntimeInstaller {
         File archive = new File(files, "prebuilt-arm64-rootfs.tar.gz");
         if (!archive.isFile() || !sha256(archive).equals(expected)) {
             if (archive.exists() && !archive.delete()) throw new IllegalStateException("无法替换损坏的内置环境包");
-            try (InputStream input = context.getAssets().open("runtime/arm64-rootfs.tar.gz");
+            try (InputStream input = context.getAssets().open("runtime/arm64-rootfs.bin");
                  FileOutputStream output = new FileOutputStream(archive)) {
                 byte[] buffer = new byte[65536];
                 int n;

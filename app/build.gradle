@@ -25,6 +25,10 @@ android {
         jniLibs.useLegacyPackaging = true
     }
 
+    androidResources {
+        noCompress 'bin'
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -40,6 +44,7 @@ tasks.register('stageSite', Sync) {
     from(rootProject.file('prebuilt')) {
         into 'runtime'
         include 'arm64-rootfs.tar.gz', 'arm64-rootfs.sha256'
+        rename { name -> name == 'arm64-rootfs.tar.gz' ? 'arm64-rootfs.bin' : name }
     }
     into(generatedAssets)
     doFirst {

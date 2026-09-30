@@ -72,7 +72,7 @@ public final class MainActivity extends Activity {
         boolean bundledArm64 = false;
         try {
             for (String asset : getAssets().list("runtime")) {
-                if ("arm64-rootfs.tar.gz".equals(asset)) bundledArm64 = true;
+                if ("arm64-rootfs.bin".equals(asset)) bundledArm64 = true;
             }
         } catch (Exception ignored) { }
         detail.setText(bundledArm64
