@@ -2,10 +2,12 @@
 node_modules/
 *.log
 .gradle/
+.gradle-user/
 build/
 app/build/
 local.properties
 *.apk
+dist/
 prebuilt/*.tar.gz
 prebuilt/*.sha256
 __pycache__/

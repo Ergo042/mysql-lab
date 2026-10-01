@@ -5,6 +5,9 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.res.Configuration;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -36,38 +39,75 @@ public final class MainActivity extends Activity {
     private TextView status;
     private ProgressBar spinner;
     private LinearLayout loading;
+    private ScrollView loadingContainer;
+    private TextView loadingAdvice;
     private boolean pageOpened;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(0xfff7f9fd);
-        getWindow().setNavigationBarColor(0xfff7f9fd);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        applySystemTheme();
+        boolean dark = isDarkTheme();
+        int foreground = dark ? 0xffe5edfa : 0xff182438;
+        int secondary = dark ? 0xffa9bad1 : 0xff70829a;
+        int card = dark ? 0xff1b2b45 : 0xffffffff;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xfff5f7fb);
+        root.setBackgroundColor(dark ? 0xff101827 : 0xfff5f7fb);
+        loadingContainer = new ScrollView(this);
+        loadingContainer.setFillViewport(true);
         loading = new LinearLayout(this);
         loading.setOrientation(LinearLayout.VERTICAL);
-        int inset = dp(24);
-        loading.setPadding(inset, dp(56), inset, inset);
-        loading.setGravity(Gravity.CENTER_HORIZONTAL);
+        loading.setPadding(dp(23), dp(42), dp(23), dp(30));
+        loading.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+        TextView eyebrow = new TextView(this);
+        eyebrow.setText("◈  YOUR POCKET DATABASE");
+        eyebrow.setTextColor(dark ? 0xff9bc2ff : 0xff3973cd);
+        eyebrow.setTextSize(11);
+        eyebrow.setTypeface(null, Typeface.BOLD);
+        eyebrow.setLetterSpacing(0.15f);
+        loading.addView(eyebrow);
         TextView title = new TextView(this);
         title.setText("MySQL Lab");
-        title.setTextSize(30);
-        title.setTextColor(0xff182438);
-        loading.addView(title);
+        title.setTextSize(35);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextColor(foreground);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
+        titleParams.topMargin = dp(10);
+        loading.addView(title, titleParams);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("一间装在手机里的 SQL 实验室");
+        subtitle.setTextColor(secondary);
+        subtitle.setTextSize(14);
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-2, -2);
+        subtitleParams.topMargin = dp(6);
+        loading.addView(subtitle, subtitleParams);
+        LinearLayout cardView = new LinearLayout(this);
+        cardView.setOrientation(LinearLayout.VERTICAL);
+        cardView.setPadding(dp(20), dp(23), dp(20), dp(23));
+        cardView.setBackground(roundRect(card, dark ? 0xff314560 : 0xffe1e9f4, 20));
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+        cardParams.topMargin = dp(35);
+        loading.addView(cardView, cardParams);
+        TextView cardEyebrow = new TextView(this);
+        cardEyebrow.setText("●  本地环境准备中");
+        cardEyebrow.setTextColor(0xff5d9df5);
+        cardEyebrow.setTextSize(12);
+        cardEyebrow.setTypeface(null, Typeface.BOLD);
+        cardView.addView(cardEyebrow);
         spinner = new ProgressBar(this);
-        LinearLayout.LayoutParams spinParams = new LinearLayout.LayoutParams(dp(52), dp(52));
-        spinParams.topMargin = dp(30);
-        loading.addView(spinner, spinParams);
+        LinearLayout.LayoutParams spinParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        spinParams.topMargin = dp(23);
+        spinParams.gravity = Gravity.CENTER_HORIZONTAL;
+        cardView.addView(spinner, spinParams);
         status = new TextView(this);
         status.setTextSize(16);
-        status.setTextColor(0xff35445c);
+        status.setTypeface(null, Typeface.BOLD);
+        status.setTextColor(foreground);
         status.setGravity(Gravity.CENTER);
         status.setText("正在准备本地服务…");
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
-        statusParams.topMargin = dp(24);
-        loading.addView(status, statusParams);
+        statusParams.topMargin = dp(17);
+        cardView.addView(status, statusParams);
         TextView detail = new TextView(this);
         boolean bundledArm64 = false;
         try {
@@ -78,30 +118,47 @@ public final class MainActivity extends Activity {
         detail.setText(bundledArm64
                 ? "首次启动会释放 APK 内置的 Ubuntu、MySQL 和网页服务，无需下载软件包。\n请预留存储空间；练习数据会保存在本机。"
                 : "首次启动将配置 Ubuntu、MySQL 和本地网页服务。请保持网络连接。\n安装完成后，练习数据会保存在本机。");
-        detail.setTextColor(0xff70829a);
-        detail.setTextSize(14);
+        detail.setTextColor(secondary);
+        detail.setTextSize(12);
         detail.setGravity(Gravity.CENTER);
         detail.setLineSpacing(dp(5), 1f);
         LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
-        detailParams.topMargin = dp(18);
-        loading.addView(detail, detailParams);
+        detailParams.topMargin = dp(14);
+        cardView.addView(detail, detailParams);
+        loadingAdvice = new TextView(this);
+        loadingAdvice.setText("环境就绪后会自动进入工作台，随后可在「闯关」中练习 SQL。");
+        loadingAdvice.setTextColor(secondary);
+        loadingAdvice.setTextSize(12);
+        loadingAdvice.setGravity(Gravity.CENTER);
+        loadingAdvice.setLineSpacing(dp(4), 1f);
+        LinearLayout.LayoutParams adviceParams = new LinearLayout.LayoutParams(-1, -2);
+        adviceParams.topMargin = dp(20);
+        loading.addView(loadingAdvice, adviceParams);
         Button retry = new Button(this);
-        retry.setText("重试启动");
+        retry.setText("↻  重试启动");
         retry.setOnClickListener(v -> {
             spinner.setVisibility(View.VISIBLE);
             status.setText("正在重试启动…");
             startService(new Intent(this, RuntimeService.class));
         });
-        loading.addView(retry);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
+        actionParams.topMargin = dp(25);
+        retry.setAllCaps(false);
+        retry.setTextColor(0xffffffff);
+        retry.setBackground(roundRect(0xff176eeb, 0xff176eeb, 12));
+        loading.addView(retry, actionParams);
         Button settings = new Button(this);
-        settings.setText("设置下载镜像与显示大小");
+        settings.setText("运行环境设置");
         settings.setOnClickListener(v -> showSettings());
-        loading.addView(settings);
+        styleSecondaryButton(settings, dark);
+        loading.addView(settings, secondaryParams());
         Button logs = new Button(this);
-        logs.setText("查看安装日志");
+        logs.setText("查看运行日志");
         logs.setOnClickListener(v -> showInstallLog());
-        loading.addView(logs);
-        root.addView(loading, new LinearLayout.LayoutParams(-1, -1));
+        styleSecondaryButton(logs, dark);
+        loading.addView(logs, secondaryParams());
+        loadingContainer.addView(loading);
+        root.addView(loadingContainer, new LinearLayout.LayoutParams(-1, -1));
         webView = new WebView(this);
         webView.setVisibility(View.GONE);
         webView.getSettings().setJavaScriptEnabled(true);
@@ -124,12 +181,53 @@ public final class MainActivity extends Activity {
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private GradientDrawable roundRect(int fill, int stroke, int radius) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(fill);
+        shape.setCornerRadius(dp(radius));
+        shape.setStroke(dp(1), stroke);
+        return shape;
+    }
+    private LinearLayout.LayoutParams secondaryParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+        params.topMargin = dp(9);
+        return params;
+    }
+    private void styleSecondaryButton(Button button, boolean dark) {
+        button.setAllCaps(false);
+        button.setTextColor(dark ? 0xffdbe7f7 : 0xff354e71);
+        button.setBackground(roundRect(dark ? 0xff1b2b45 : 0xffffffff, dark ? 0xff32465f : 0xffe0e8f3, 12));
+    }
+    private String startupAdvice(String message) {
+        if (!message.startsWith("启动失败：")) return "环境就绪后会自动进入工作台，随后可在「闯关」中练习 SQL。";
+        String lower = message.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("space") || lower.contains("空间") || lower.contains("磁盘")) return "存储空间可能不足。清理部分空间后点击重试，并保留安装日志用于定位。";
+        if (lower.contains("dpkg") || lower.contains("apt")) return "软件包配置失败。可在运行环境设置中更换大陆镜像，然后点击重试；日志有具体原因。";
+        if (lower.contains("mysql")) return "MySQL 未能启动。请查看运行日志，确认安装完整后再重试。";
+        if (lower.contains("download") || lower.contains("网络")) return "下载中断。检查网络连接，或切换软件源后重试。";
+        return "可先重试；若问题持续，请打开运行日志并检查剩余存储空间。";
+    }
+    private boolean isDarkTheme() {
+        String mode = getSharedPreferences("settings", MODE_PRIVATE).getString("theme_mode", "system");
+        return "dark".equals(mode) || ("system".equals(mode) && (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES);
+    }
+    private void applySystemTheme() {
+        boolean dark = isDarkTheme();
+        getWindow().setStatusBarColor(dark ? 0xff101827 : 0xfff7f9fd);
+        getWindow().setNavigationBarColor(dark ? 0xff101827 : 0xfff7f9fd);
+        getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+    }
 
     public static final class AppBridge {
         private final MainActivity activity;
         public AppBridge(MainActivity activity) { this.activity = activity; }
         @JavascriptInterface public void openSettings() {
             activity.runOnUiThread(activity::showSettings);
+        }
+        @JavascriptInterface public void setThemeMode(String mode) {
+            if (!"light".equals(mode) && !"dark".equals(mode) && !"system".equals(mode)) return;
+            activity.getSharedPreferences("settings", Activity.MODE_PRIVATE).edit().putString("theme_mode", mode).apply();
+            activity.runOnUiThread(activity::applySystemTheme);
         }
     }
 
@@ -230,12 +328,14 @@ public final class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if (finalReady && !pageOpened) {
                     pageOpened = true;
-                    loading.setVisibility(View.GONE);
+                    loadingContainer.setVisibility(View.GONE);
                     webView.setVisibility(View.VISIBLE);
                     webView.loadUrl("http://127.0.0.1:3000/");
                 } else if (!finalReady) {
                     status.setText(finalMessage);
-                    spinner.setVisibility(finalMessage.startsWith("启动失败：") ? View.INVISIBLE : View.VISIBLE);
+                    boolean failed = finalMessage.startsWith("启动失败：");
+                    spinner.setVisibility(failed ? View.GONE : View.VISIBLE);
+                    loadingAdvice.setText(startupAdvice(finalMessage));
                 }
                 handler.postDelayed(this::poll, 1500);
             });

@@ -12,8 +12,8 @@ android {
         // PRoot runs Linux ELF files from the app's private data directory.
         // Android 10's W^X restriction blocks that for targetSdk >= 29.
         targetSdk 28
-        versionCode 6
-        versionName '0.3.1'
+        versionCode 7
+        versionName '0.4.0'
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
     }
 
@@ -38,6 +38,7 @@ android {
 def generatedAssets = layout.buildDirectory.dir('generated/runtimeAssets')
 tasks.register('stageSite', Sync) {
     from(rootProject.file('server.js')) { into 'site' }
+    from(rootProject.file('challenges.js')) { into 'site' }
     from(rootProject.file('package.json')) { into 'site' }
     from(rootProject.file('package-lock.json')) { into 'site' }
     from(rootProject.file('public')) { into 'site/public' }

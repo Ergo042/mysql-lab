@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
+import { challenges, publicChallenges, validateAnswer } from './challenges.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.MYSQL_HOST || 'localhost';
@@ -36,7 +37,16 @@ function sqlFailure(cause) {
     ER_DATA_TOO_LONG: '写入内容超过字段允许的长度。',
     ER_NO_DEFAULT_FOR_FIELD: '有必填字段没有提供值。',
     ER_TRUNCATED_WRONG_VALUE: '值的格式与字段类型不匹配。',
-    ER_LOCK_WAIT_TIMEOUT: '等待数据库锁超时，请稍后重试。'
+    ER_LOCK_WAIT_TIMEOUT: '等待数据库锁超时，请稍后重试。',
+    ER_BAD_NULL_ERROR: '必填字段不能写入 NULL；检查表结构并提供有效值。',
+    ER_ROW_IS_REFERENCED_2: '这条记录仍被其他表引用；先处理关联记录。',
+    ER_NO_REFERENCED_ROW_2: '关联的记录不存在；先确认外键引用的 id 已存在。',
+    ER_WRONG_VALUE_COUNT_ON_ROW: 'INSERT 的列数和值的数量不一致；逐个核对。',
+    ER_NON_UNIQ_ERROR: '多个表中存在同名列；用表别名限定列，例如 s.name。',
+    ER_GROUP_FIELD_WITH_GROUP: '检查 GROUP BY 与 SELECT 中的非聚合列。',
+    ER_WRONG_FIELD_WITH_GROUP: '分组查询中的非聚合列需要写入 GROUP BY。',
+    ER_ACCESS_DENIED_ERROR: '数据库连接被拒绝；可在设置中查看运行环境与安装日志。',
+    ER_CON_COUNT_ERROR: '数据库连接数过多；请稍后再试或重启应用。'
   };
   const message = cause.sqlMessage || cause.message || 'SQL 执行失败';
   const line = Number(/at line (\d+)/i.exec(message)?.[1]) || null;
@@ -176,6 +186,43 @@ async function runQuery(student, database, sql) {
     return { sets, durationMs: Math.round(performance.now() - start) };
   } finally { await connection.end().catch(() => {}); }
 }
+function canonicalRows(rows, ordered) {
+  const normalized = rows.map(row => Object.values(row).map(value => value === null ? null : String(value)));
+  return ordered ? normalized : normalized.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+function missingSkill(id, sql) {
+  const rules = {
+    'first-select': [[/\bORDER\s+BY\b/i, '这题需要用 ORDER BY 按学生 id 排序。']],
+    'filter-grade': [[/\bWHERE\b/i, '这题需要用 WHERE 筛选年级。'], [/\bORDER\s+BY\b/i, '还需要用 ORDER BY 按 id 排序。']],
+    credits: [[/\bWHERE\b/i, '这题需要用 WHERE 筛选学分。'], [/\bORDER\s+BY\b/i, '还需要用 ORDER BY 按课程 id 排序。']],
+    'top-score': [[/\bORDER\s+BY\b/i, '先用 ORDER BY 给成绩排序。'], [/\bDESC\b/i, '成绩需要从高到低，使用 DESC。'], [/\bLIMIT\s+3\b/i, '只保留前三名，使用 LIMIT 3。']],
+    'join-names': [[/\bJOIN\b/i, '需要用 JOIN 连接学生、课程和选课记录。'], [/\bORDER\s+BY\b/i, '还需要按成绩排序。']],
+    'count-students': [[/\bCOUNT\s*\(/i, '请使用 COUNT 统计人数。']],
+    'group-grade': [[/\bGROUP\s+BY\b/i, '请使用 GROUP BY 按年级分组。'], [/\bCOUNT\s*\(/i, '请用 COUNT 统计每组人数。']],
+    'average-score': [[/\bJOIN\b/i, '请先连接课程与选课记录。'], [/\bGROUP\s+BY\b/i, '请按课程分组。'], [/\bAVG\s*\(/i, '请用 AVG 计算平均分。'], [/\bROUND\s*\(/i, '请用 ROUND 保留一位小数。']]
+  };
+  return rules[id]?.find(([pattern]) => !pattern.test(sql))?.[1] || null;
+}
+async function judgeChallenge(student, challenge, sql) {
+  const missing = missingSkill(challenge.id, sql);
+  if (missing) return { passed: false, feedback: missing, hint: challenge.hint };
+  const connection = await mysql.createConnection({ host: HOST, user: student.db_user, password: student.db_password, database: student.db_name, dateStrings: true, supportBigNumbers: true, bigNumberStrings: true, multipleStatements: false, connectTimeout: 10000 });
+  try {
+    await connection.query('SET SESSION max_execution_time = 6000');
+    const [expected, expectedFields] = await connection.query({ sql: challenge.expected, timeout: 8000 });
+    const [actual, actualFields] = await connection.query({ sql, timeout: 8000 });
+    if (!Array.isArray(actual)) return { passed: false, feedback: '请提交能返回结果行的 SELECT 查询。', hint: challenge.hint };
+    if (actual.length > 500) return { passed: false, feedback: '查询返回超过 500 行；请缩小结果范围。', hint: challenge.hint };
+    const columns = actualFields.map(field => field.name);
+    const wantedColumns = expectedFields.map(field => field.name);
+    if (JSON.stringify(columns) !== JSON.stringify(wantedColumns)) return { passed: false, feedback: `列名或顺序需要调整。目标列：${wantedColumns.join('、')}；当前列：${columns.join('、') || '无'}。`, hint: challenge.hint };
+    if (actual.length !== expected.length) return { passed: false, feedback: `行数还不对：期望 ${expected.length} 行，当前 ${actual.length} 行。检查筛选、连接或分组条件。`, hint: challenge.hint };
+    const same = JSON.stringify(canonicalRows(actual, challenge.ordered)) === JSON.stringify(canonicalRows(expected, challenge.ordered));
+    return same
+      ? { passed: true, feedback: `通过！${actual.length} 行结果均正确。`, lesson: challenge.lesson }
+      : { passed: false, feedback: challenge.ordered ? '行内容或顺序与目标结果不同；检查筛选条件和 ORDER BY。' : '行内容与目标结果不同；检查计算、连接或分组条件。', hint: challenge.hint };
+  } finally { await connection.end().catch(() => {}); }
+}
 async function resetStudent(student) {
   await admin.query(`DROP DATABASE IF EXISTS ${quoteId(student.db_name)}`);
   await admin.query(`CREATE DATABASE ${quoteId(student.db_name)} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
@@ -185,7 +232,7 @@ async function resetStudent(student) {
 }
 async function staticFile(req, res, pathname) {
   const filename = pathname === '/' ? 'index.html' : pathname.slice(1);
-  if (!/^(index\.html|style\.css|mobile\.css|app\.js|favicon\.svg)$/.test(filename)) return error(res, 404, '页面不存在');
+  if (!/^(index\.html|style\.css|mobile\.css|experience\.css|app\.js|favicon\.svg)$/.test(filename)) return error(res, 404, '页面不存在');
   const file = await readFile(path.join(publicDir, filename));
   res.writeHead(200, { 'content-type': mime[path.extname(filename)], 'content-length': file.length, 'cache-control': 'no-store' });
   res.end(file);
@@ -221,6 +268,31 @@ async function handler(req, res) {
     if (pathname === '/api/session' && req.method === 'DELETE') {
       res.setHeader('set-cookie', `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
       return json(res, 200, { ok: true });
+    }
+    if (pathname === '/api/profile' && req.method === 'POST') {
+      const current = await session(req);
+      if (!current) return error(res, 401, '请先创建练习空间');
+      const { name } = await bodyJson(req);
+      const displayName = typeof name === 'string' ? name.trim() : '';
+      if (displayName.length < 1 || displayName.length > 24) return error(res, 400, '名称需为 1–24 个字符');
+      await admin.query(`UPDATE ${META_DB}.students SET display_name = ? WHERE id = ?`, [displayName, current.id]);
+      return json(res, 200, { student: { name: displayName, database: current.db_name } });
+    }
+    if (pathname === '/api/challenges' && req.method === 'GET') {
+      const current = await session(req);
+      if (!current) return error(res, 401, '请先创建练习空间');
+      return json(res, 200, { challenges: publicChallenges() });
+    }
+    if (pathname === '/api/challenges/submit' && req.method === 'POST') {
+      const current = await session(req);
+      if (!current) return error(res, 401, '请先创建练习空间');
+      const { id, sql } = await bodyJson(req);
+      const challenge = challenges.find(item => item.id === id);
+      if (!challenge) return error(res, 404, '题目不存在，请刷新题库');
+      const invalid = validateAnswer(sql);
+      if (invalid) return json(res, 400, { error: invalid, hint: challenge.hint });
+      try { return json(res, 200, await judgeChallenge(current, challenge, sql)); }
+      catch (cause) { return json(res, 400, sqlFailure(cause)); }
     }
     if (pathname === '/api/schema' && req.method === 'GET') {
       const current = await session(req);

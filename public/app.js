@@ -11,14 +11,43 @@ let toastTimer;
 let databases = [];
 let activeDatabase = null;
 let currentView = 'workspace';
+const isPhone = !!window.Android || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const defaultPreferences = { theme: 'system', accent: 'blue', fontSize: '14', resultDensity: 'comfortable', lineWrap: false, autoSave: true, showHints: true, reduceMotion: false };
+let preferences = { ...defaultPreferences };
+let challenges = [];
+let selectedChallengeId = null;
+let passedChallenges = new Set();
+try { preferences = { ...preferences, ...JSON.parse(localStorage.getItem('mysql-lab-preferences') || '{}') }; } catch {}
+function resolvedTheme() { return preferences.theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : preferences.theme; }
+function applyPreferences() {
+  const theme = resolvedTheme();
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.accent = preferences.accent;
+  document.documentElement.dataset.density = preferences.resultDensity;
+  document.documentElement.dataset.wrap = preferences.lineWrap ? 'on' : 'off';
+  document.documentElement.dataset.reduceMotion = preferences.reduceMotion ? 'on' : 'off';
+  document.documentElement.style.setProperty('--editor-size', `${Number(preferences.fontSize) || 14}px`);
+  document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#101827' : '#f7f8fb';
+  if (window.Android?.setThemeMode) window.Android.setThemeMode(preferences.theme);
+  document.querySelectorAll('button[data-theme]').forEach(button => button.classList.toggle('selected', button.dataset.theme === preferences.theme));
+  document.querySelectorAll('button[data-accent]').forEach(button => button.classList.toggle('selected', button.dataset.accent === preferences.accent));
+  $('#fontSize').value = preferences.fontSize;
+  $('#resultDensity').value = preferences.resultDensity;
+  for (const key of ['lineWrap', 'autoSave', 'showHints', 'reduceMotion']) $(`#${key}`).checked = !!preferences[key];
+}
+function savePreferences() { try { localStorage.setItem('mysql-lab-preferences', JSON.stringify(preferences)); } catch {} applyPreferences(); }
+applyPreferences();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (preferences.theme === 'system') applyPreferences(); });
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { credentials: 'same-origin', headers: { 'content-type': 'application/json' }, ...options });
+  let response;
+  try { response = await fetch(path, { credentials: 'same-origin', headers: { 'content-type': 'application/json' }, ...options }); }
+  catch { const error = new Error('无法连接本地服务'); error.hint = '检查应用是否仍在运行；返回上一页并重试启动，必要时到设置查看运行日志。'; throw error; }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(data.error || `请求失败 (${response.status})`);
     error.code = data.code;
-    error.hint = data.hint;
+    error.hint = data.hint || (response.status === 401 ? '练习空间已失效，请重新打开应用。' : response.status >= 500 ? '本地服务遇到异常，请稍后重试；反复出现时查看运行日志。' : '检查输入后重试。');
     error.line = data.line;
     throw error;
   }
@@ -29,8 +58,9 @@ function toast(message) {
   element.textContent = message;
   element.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => element.classList.remove('show'), 3000);
+  toastTimer = setTimeout(() => element.classList.remove('show'), message.length > 45 ? 6500 : 3500);
 }
+function toastError(action, error) { toast(`${action}：${error.message}${error.hint ? `。建议：${error.hint}` : ''}`); }
 function syncLines() {
   const count = editor.value.split('\n').length;
   $('#lineNumbers').textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
@@ -41,9 +71,11 @@ function setStudent(value) {
   $('#headerName').textContent = value?.name || '访客';
   $('#avatar').textContent = (value?.name || 'S').slice(0, 1).toUpperCase();
   if (value) {
+    $('#profileName').value = value.name;
     try { activeDatabase = localStorage.getItem(`mysql-lab-database-${value.database}`) || value.database; }
     catch { activeDatabase = value.database; }
     refreshDatabases();
+    loadChallenges();
   }
 }
 function closeSidebar() {
@@ -61,13 +93,22 @@ function showView(view) {
   currentView = view;
   $('#workspaceView').hidden = view !== 'workspace';
   $('#manageView').hidden = view !== 'manage';
+  $('#challengeView').hidden = view !== 'challenges';
+  $('#settingsView').hidden = view !== 'settings';
   $('#navWorkspace').classList.toggle('active', view === 'workspace');
   $('#navManage').classList.toggle('active', view === 'manage');
+  $('#navChallenges').classList.toggle('active', view === 'challenges');
+  $('#navSettings').classList.toggle('active', view === 'settings');
   $('#mobileWorkspace').classList.toggle('active', view === 'workspace');
   $('#mobileManage').classList.toggle('active', view === 'manage');
-  $('#breadcrumbCurrent').textContent = view === 'workspace' ? 'SQL 查询' : '数据库管理';
-  $('#pageHeading').textContent = view === 'workspace' ? 'SQL 工作台' : '数据库管理';
-  $('#pageDescription').textContent = view === 'workspace' ? '写下你的查询，探索数据背后的答案。' : '创建数据库、浏览数据表，整理你的练习空间。';
+  $('#mobileChallenges').classList.toggle('active', view === 'challenges');
+  $('#mobileSettings').classList.toggle('active', view === 'settings');
+  const pages = { workspace: ['SQL 查询', 'SQL 工作台', '写下你的查询，探索数据背后的答案。'], manage: ['数据库管理', '数据库管理', '创建数据库、浏览数据表，整理你的练习空间。'], challenges: ['本地 Mini OJ', '闯关练习', '八道渐进练习，写 SQL、立即判题、从反馈中学会修正。'], settings: ['个性设置', '设置', '为这台设备调整外观、编辑体验与学习节奏。'] };
+  const [crumb, heading, description] = pages[view] || pages.workspace;
+  $('#breadcrumbCurrent').textContent = crumb;
+  $('#pageHeading').textContent = heading;
+  $('#pageDescription').textContent = description;
+  $('.eyebrow').textContent = ({ workspace: 'YOUR WORKSPACE', manage: 'ORGANIZE YOUR DATA', challenges: 'SQL QUEST', settings: 'MAKE IT YOURS' })[view] || 'YOUR WORKSPACE';
   closeSidebar();
 }
 function databaseLabel(database) { return database?.isDefault ? '示例数据库' : database?.name || '数据库'; }
@@ -117,7 +158,7 @@ async function refreshDatabases(preferred) {
     try { localStorage.setItem(`mysql-lab-database-${student.database}`, activeDatabase); } catch {}
     renderDatabases();
     await refreshSchema();
-  } catch (error) { toast(`读取数据库失败：${error.message}`); }
+  } catch (error) { toastError('读取数据库失败', error); }
 }
 async function switchDatabase(databaseName) {
   if (activeDatabase === databaseName) return closeSidebar();
@@ -143,7 +184,7 @@ async function removeDatabase(database) {
     await api('/api/databases/delete', { method: 'POST', body: JSON.stringify({ database: database.databaseName }) });
     await refreshDatabases(activeDatabase === database.databaseName ? student.database : activeDatabase);
     toast('数据库已删除');
-  } catch (error) { toast(`删除失败：${error.message}`); }
+  } catch (error) { toastError('删除失败', error); }
 }
 async function refreshSchema() {
   if (!student || !activeDatabase) return;
@@ -222,6 +263,7 @@ function loadTableSql(tableName, command) {
   syncLines(); saveDraft(); showView('workspace'); runQuery();
 }
 function saveDraft() {
+  if (!preferences.autoSave) return;
   try { localStorage.setItem('mysql-lab-draft', editor.value); } catch {}
 }
 function showSet(index) {
@@ -308,16 +350,140 @@ async function runQuery() {
   }
 }
 
+function progressKey() { return `mysql-lab-progress-${student?.database || 'guest'}`; }
+function challengeDraftKey(id) { return `mysql-lab-challenge-${student?.database || 'guest'}-${id}`; }
+async function loadChallenges() {
+  try {
+    ({ challenges } = await api('/api/challenges'));
+    try {
+      const saved = JSON.parse(localStorage.getItem(progressKey()) || '[]');
+      passedChallenges = new Set(saved.filter(id => challenges.some(item => item.id === id)));
+      selectedChallengeId = localStorage.getItem(`${progressKey()}-selected`) || selectedChallengeId;
+    } catch { passedChallenges = new Set(); }
+    selectedChallengeId = challenges.some(item => item.id === selectedChallengeId) ? selectedChallengeId : challenges[0]?.id;
+    renderChallenges();
+  } catch (error) { $('#challengeList').textContent = `题库加载失败：${error.message}。请确认本地服务已启动。`; }
+}
+function renderChallenges() {
+  $('#challengeProgress').textContent = `${passedChallenges.size} / ${challenges.length}`;
+  const list = $('#challengeList');
+  list.textContent = '';
+  for (const [index, challenge] of challenges.entries()) {
+    const button = addText(list, 'button', '', `challenge-choice${challenge.id === selectedChallengeId ? ' active' : ''}`);
+    button.type = 'button';
+    addText(button, 'span', passedChallenges.has(challenge.id) ? '✓' : String(index + 1).padStart(2, '0'), 'challenge-number');
+    const info = addText(button, 'span', '', 'challenge-choice-info');
+    addText(info, 'strong', challenge.title);
+    addText(info, 'small', `${challenge.level} · ${challenge.topic}`);
+    button.addEventListener('click', () => {
+      selectedChallengeId = challenge.id;
+      try { localStorage.setItem(`${progressKey()}-selected`, challenge.id); } catch {}
+      renderChallenges();
+    });
+  }
+  renderChallengeDetail();
+}
+function renderChallengeDetail() {
+  const challenge = challenges.find(item => item.id === selectedChallengeId);
+  const root = $('#challengeDetail');
+  root.textContent = '';
+  if (!challenge) return addText(root, 'div', '选择一道题，开始练习。', 'challenge-empty');
+  const heading = addText(root, 'div', '', 'challenge-heading');
+  addText(heading, 'span', challenge.level, 'level-pill');
+  addText(heading, 'span', challenge.topic, 'topic-label');
+  addText(root, 'h3', challenge.title);
+  addText(root, 'p', challenge.description, 'challenge-description');
+  const lesson = addText(root, 'div', '', 'lesson-note');
+  addText(lesson, 'strong', '知识卡片');
+  addText(lesson, 'span', challenge.lesson);
+  const editorLabel = addText(root, 'label', '你的 SQL', 'challenge-editor-label');
+  const answer = document.createElement('textarea');
+  answer.className = 'challenge-editor';
+  answer.spellcheck = false;
+  answer.autocapitalize = 'off';
+  answer.setAttribute('aria-label', `${challenge.title} 的 SQL 答案`);
+  editorLabel.append(answer);
+  try { answer.value = localStorage.getItem(challengeDraftKey(challenge.id)) ?? challenge.starter; }
+  catch { answer.value = challenge.starter; }
+  answer.addEventListener('input', () => { try { localStorage.setItem(challengeDraftKey(challenge.id), answer.value); } catch {} });
+  const actions = addText(root, 'div', '', 'challenge-actions');
+  const submit = addText(actions, 'button', '提交判题 →', 'run-button');
+  submit.type = 'button';
+  const workspace = addText(actions, 'button', '到工作台实验', 'outline-button');
+  workspace.type = 'button';
+  const hint = addText(root, 'button', '需要一点提示？', 'hint-reveal');
+  hint.type = 'button';
+  const hintText = addText(root, 'div', challenge.hint, 'challenge-hint');
+  hintText.hidden = true;
+  hint.addEventListener('click', () => { hintText.hidden = !hintText.hidden; hint.textContent = hintText.hidden ? '需要一点提示？' : '收起提示'; });
+  const verdict = addText(root, 'div', '', 'challenge-verdict');
+  verdict.hidden = true;
+  submit.addEventListener('click', async () => {
+    submit.disabled = true;
+    submit.textContent = '正在判题…';
+    verdict.hidden = true;
+    try {
+      const result = await api('/api/challenges/submit', { method: 'POST', body: JSON.stringify({ id: challenge.id, sql: answer.value }) });
+      verdict.className = `challenge-verdict ${result.passed ? 'passed' : 'failed'}`;
+      verdict.textContent = '';
+      addText(verdict, 'strong', result.passed ? '✓ 通过挑战' : '再试一次');
+      addText(verdict, 'p', result.feedback);
+      if (!result.passed && preferences.showHints && result.hint) addText(verdict, 'small', `建议：${result.hint}`);
+      if (result.passed) {
+        passedChallenges.add(challenge.id);
+        try { localStorage.setItem(progressKey(), JSON.stringify([...passedChallenges])); } catch {}
+        const choice = [...$('#challengeList').children][challenges.findIndex(item => item.id === challenge.id)];
+        choice?.querySelector('.challenge-number')?.replaceChildren(document.createTextNode('✓'));
+        $('#challengeProgress').textContent = `${passedChallenges.size} / ${challenges.length}`;
+      }
+    } catch (error) {
+      verdict.className = 'challenge-verdict failed';
+      verdict.textContent = '';
+      addText(verdict, 'strong', error.line ? `SQL 第 ${error.line} 行需要检查` : '提交遇到问题');
+      addText(verdict, 'p', error.message);
+      if (preferences.showHints) addText(verdict, 'small', `建议：${error.hint || challenge.hint}`);
+    } finally {
+      verdict.hidden = false;
+      submit.disabled = false;
+      submit.textContent = '提交判题 →';
+      verdict.scrollIntoView({ behavior: preferences.reduceMotion ? 'auto' : 'smooth', block: 'center' });
+    }
+  });
+  workspace.addEventListener('click', async () => {
+    if (activeDatabase !== student.database) await switchDatabase(student.database);
+    editor.value = answer.value;
+    syncLines(); saveDraft(); showView('workspace'); editor.focus();
+    toast('练习 SQL 已载入示例数据库的工作台');
+  });
+}
+async function createMobileStudent(accessCode = '') {
+  $('#welcomeModal').hidden = true;
+  $('#resultCount').textContent = '正在准备本机练习空间';
+  try {
+    const data = await api('/api/session', { method: 'POST', body: JSON.stringify({ name: '本机学员', accessCode }) });
+    setStudent(data.student);
+    $('#resultCount').textContent = '等待运行';
+  } catch (error) {
+    if (error.code === 'SESSION_EXISTS' || error.message.includes('已有练习空间')) {
+      const data = await api('/api/session');
+      if (data.student) return setStudent(data.student);
+    }
+    setStudent(null);
+    $('#welcomeDescription').textContent = `创建本机练习空间失败：${error.message}。请重试。`;
+    $('#formError').textContent = error.hint || '';
+  }
+}
+
 $('#welcomeForm').addEventListener('submit', async event => {
   event.preventDefault();
   const button = $('#startButton');
   button.disabled = true;
   $('#formError').textContent = '';
   try {
-    const { student } = await api('/api/session', { method: 'POST', body: JSON.stringify({ name: $('#studentName').value, accessCode: $('#accessCode').value }) });
+    const { student } = await api('/api/session', { method: 'POST', body: JSON.stringify({ name: isPhone ? '本机学员' : $('#studentName').value, accessCode: $('#accessCode').value }) });
     setStudent(student);
     toast('专属练习空间已准备好');
-  } catch (error) { $('#formError').textContent = error.message; }
+  } catch (error) { $('#formError').textContent = `${error.message}。${error.hint || ''}`; }
   finally { button.disabled = false; }
 });
 $('#runQuery').addEventListener('click', runQuery);
@@ -326,11 +492,39 @@ $('#clearEditor').addEventListener('click', () => { editor.value = ''; syncLines
 $('#refreshSchema').addEventListener('click', () => refreshDatabases());
 $('#navWorkspace').addEventListener('click', () => showView('workspace'));
 $('#navManage').addEventListener('click', () => showView('manage'));
+$('#navChallenges').addEventListener('click', () => showView('challenges'));
+$('#navSettings').addEventListener('click', () => showView('settings'));
 $('#mobileWorkspace').addEventListener('click', () => showView('workspace'));
 $('#mobileManage').addEventListener('click', () => showView('manage'));
-function openAppSettings() { if (window.Android?.openSettings) window.Android.openSettings(); }
-$('#mobileSettings').addEventListener('click', openAppSettings);
-$('.settings-button').addEventListener('click', openAppSettings);
+$('#mobileChallenges').addEventListener('click', () => showView('challenges'));
+$('#mobileSettings').addEventListener('click', () => showView('settings'));
+$('.settings-button').addEventListener('click', () => showView('settings'));
+$('#runtimeSettings').hidden = !window.Android?.openSettings;
+$('#runtimeSettings').addEventListener('click', () => window.Android?.openSettings?.());
+$('#themeOptions').addEventListener('click', event => { const value = event.target.closest('[data-theme]')?.dataset.theme; if (['system', 'light', 'dark'].includes(value)) { preferences.theme = value; savePreferences(); } });
+$('#accentOptions').addEventListener('click', event => { const value = event.target.closest('[data-accent]')?.dataset.accent; if (['blue', 'violet', 'mint', 'orange'].includes(value)) { preferences.accent = value; savePreferences(); } });
+for (const key of ['fontSize', 'resultDensity', 'lineWrap', 'autoSave', 'showHints', 'reduceMotion']) {
+  $(`#${key}`).addEventListener('change', event => { preferences[key] = event.target.type === 'checkbox' ? event.target.checked : event.target.value; savePreferences(); });
+}
+$('#clearProgress').addEventListener('click', () => {
+  if (!student || !confirm('清除这台设备上的闯关记录？SQL 草稿和数据库内容仍会保留。')) return;
+  passedChallenges.clear();
+  try { localStorage.removeItem(progressKey()); } catch {}
+  renderChallenges();
+  toast('闯关进度已清除');
+});
+$('#profileForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorText = $('#profileError');
+  errorText.textContent = '';
+  try {
+    const data = await api('/api/profile', { method: 'POST', body: JSON.stringify({ name: $('#profileName').value }) });
+    student = data.student;
+    $('#headerName').textContent = student.name;
+    $('#avatar').textContent = student.name.slice(0, 1).toUpperCase();
+    toast('显示名称已更新');
+  } catch (error) { errorText.textContent = `${error.message}。${error.hint || ''}`; }
+});
 $('#sidebarAddDatabase').addEventListener('click', openDatabaseModal);
 $('#createDatabase').addEventListener('click', openDatabaseModal);
 $('#cancelDatabase').addEventListener('click', () => { $('#databaseModal').hidden = true; });
@@ -346,7 +540,7 @@ $('#databaseForm').addEventListener('submit', async event => {
     await refreshDatabases(database.databaseName);
     showView('manage');
     toast('数据库已创建并切换');
-  } catch (error) { $('#databaseFormError').textContent = error.message; }
+  } catch (error) { $('#databaseFormError').textContent = `${error.message}。${error.hint || ''}`; }
   finally { button.disabled = false; }
 });
 $('#createTable').addEventListener('click', () => {
@@ -366,7 +560,7 @@ $('#resetDatabase').addEventListener('click', async () => {
     await refreshSchema();
     toast('示例数据库已恢复');
     closeSidebar();
-  } catch (error) { toast(error.message); }
+  } catch (error) { toastError('重置失败', error); }
   finally { button.disabled = false; }
 });
 $('#mobileSchema').addEventListener('click', () => { $('#sidebar').classList.add('open'); $('#scrim').classList.add('open'); });
@@ -391,6 +585,18 @@ editor.addEventListener('keydown', event => {
   }
 });
 editor.addEventListener('scroll', () => { $('#lineNumbers').scrollTop = editor.scrollTop; });
-try { const draft = localStorage.getItem('mysql-lab-draft'); if (draft !== null) editor.value = draft; } catch {}
+try { const draft = localStorage.getItem('mysql-lab-draft'); if (preferences.autoSave && draft !== null) editor.value = draft; } catch {}
 syncLines();
-api('/api/session').then(({ student, accessCodeRequired }) => { $('#accessCodeField').hidden = !accessCodeRequired; $('#accessCode').required = accessCodeRequired; setStudent(student); }).catch(error => { setStudent(null); $('#formError').textContent = `连接失败：${error.message}`; });
+api('/api/session').then(({ student: existing, accessCodeRequired }) => {
+  $('#accessCodeField').hidden = !accessCodeRequired;
+  $('#accessCode').required = accessCodeRequired;
+  if (isPhone) {
+    $('#studentNameField').hidden = true;
+    $('#studentName').required = false;
+    $('#welcomeDescription').textContent = accessCodeRequired ? '输入练习码后，应用会自动准备本机练习空间。' : '正在自动准备本机练习空间…';
+    $('#welcomeNote').textContent = '练习数据与设置保存在本机。';
+    if (existing) setStudent(existing);
+    else if (accessCodeRequired) setStudent(null);
+    else createMobileStudent();
+  } else setStudent(existing);
+}).catch(error => { setStudent(null); $('#formError').textContent = `连接失败：${error.message}。${error.hint || ''}`; });
