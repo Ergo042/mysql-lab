@@ -10,6 +10,7 @@ import android.os.IBinder;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 
 public final class RuntimeService extends Service {
     private Thread worker;
@@ -29,6 +30,13 @@ public final class RuntimeService extends Service {
             worker = new Thread(() -> {
                 try { new RuntimeInstaller(this).start(); }
                 catch (Exception error) {
+                    try {
+                        java.io.StringWriter trace = new java.io.StringWriter();
+                        error.printStackTrace(new java.io.PrintWriter(trace));
+                        Files.write(getFileStreamPath("runtime.log").toPath(),
+                                ("Startup failure:\n" + trace + "\n").getBytes(StandardCharsets.UTF_8),
+                                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    } catch (Exception ignored) { }
                     try { Files.write(getFileStreamPath("runtime-status.txt").toPath(),
                             ("启动失败：" + error.getMessage()).getBytes(StandardCharsets.UTF_8)); }
                     catch (Exception ignored) { }

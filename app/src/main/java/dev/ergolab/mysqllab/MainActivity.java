@@ -9,8 +9,11 @@ import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.system.Os;
+import android.system.OsConstants;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.WebChromeClient;
@@ -153,7 +156,7 @@ public final class MainActivity extends Activity {
         styleSecondaryButton(settings, dark);
         loading.addView(settings, secondaryParams());
         Button logs = new Button(this);
-        logs.setText("查看运行日志");
+        logs.setText("查看诊断日志");
         logs.setOnClickListener(v -> showInstallLog());
         styleSecondaryButton(logs, dark);
         loading.addView(logs, secondaryParams());
@@ -201,6 +204,7 @@ public final class MainActivity extends Activity {
     private String startupAdvice(String message) {
         if (!message.startsWith("启动失败：")) return "环境就绪后会自动进入工作台，随后可在「闯关」中练习 SQL。";
         String lower = message.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("proot") || lower.contains("signal 11")) return "PRoot 进程异常退出。打开「运行环境设置 → PRoot 兼容模式」切换模式并重试；请复制诊断日志反馈。";
         if (lower.contains("space") || lower.contains("空间") || lower.contains("磁盘")) return "存储空间可能不足。清理部分空间后点击重试，并保留安装日志用于定位。";
         if (lower.contains("dpkg") || lower.contains("apt")) return "软件包配置失败。可在运行环境设置中更换大陆镜像，然后点击重试；日志有具体原因。";
         if (lower.contains("mysql")) return "MySQL 未能启动。请查看运行日志，确认安装完整后再重试。";
@@ -255,6 +259,30 @@ public final class MainActivity extends Activity {
                     showDisplaySettings();
                 })
                 .setNeutralButton("显示设置", (dialog, which) -> showDisplaySettings())
+                .setPositiveButton("PRoot 兼容模式", (dialog, which) -> showProotSettings())
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void showProotSettings() {
+        String[] values = {"auto", "standard", "no_sysvipc", "no_seccomp", "no_sysvipc_no_seccomp"};
+        String[] labels = {
+                "自动探测基础命令（默认）",
+                "标准模式",
+                "兼容模式 A · 关闭 SysV IPC",
+                "兼容模式 B · 关闭 seccomp 加速",
+                "兼容模式 C · 同时关闭两项"
+        };
+        String selected = getSharedPreferences("settings", MODE_PRIVATE).getString("proot_mode", "auto");
+        int current = 0;
+        for (int i = 0; i < values.length; i++) if (values[i].equals(selected)) current = i;
+        new AlertDialog.Builder(this)
+                .setTitle("PRoot 兼容模式")
+                .setSingleChoiceItems(labels, current, (dialog, which) -> {
+                    getSharedPreferences("settings", MODE_PRIVATE).edit().putString("proot_mode", values[which]).apply();
+                    Toast.makeText(this, "已保存；启动失败页点击“重试启动”或重新打开应用后生效", Toast.LENGTH_LONG).show();
+                    dialog.dismiss();
+                })
                 .setNegativeButton("关闭", null)
                 .show();
     }
@@ -276,19 +304,28 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
-    private void showInstallLog() {
-        String log;
-        File file = getFileStreamPath("runtime.log");
+    private String tail(File file, int limit) {
         try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
-            long start = Math.max(0, input.length() - 16000);
+            long start = Math.max(0, input.length() - limit);
             input.seek(start);
             byte[] bytes = new byte[(int) (input.length() - start)];
             input.readFully(bytes);
-            log = new String(bytes, StandardCharsets.UTF_8);
-            if (start > 0) log = "…仅显示最后 16 KB…\n" + log;
-        } catch (Exception error) {
-            log = "尚无安装日志：" + error.getMessage();
-        }
+            return (start > 0 ? "…仅显示最后 " + limit / 1024 + " KB…\n" : "") + new String(bytes, StandardCharsets.UTF_8);
+        } catch (Exception error) { return "暂无日志（" + error.getClass().getSimpleName() + "）"; }
+    }
+
+    private void showInstallLog() {
+        String pageSize;
+        try { pageSize = String.valueOf(Os.sysconf(OsConstants._SC_PAGESIZE)); }
+        catch (Exception error) { pageSize = "未知"; }
+        String log = "设备：" + Build.MANUFACTURER + " " + Build.MODEL + "\nAndroid：" + Build.VERSION.RELEASE +
+                "（API " + Build.VERSION.SDK_INT + "）\nABI：" + java.util.Arrays.toString(Build.SUPPORTED_ABIS) +
+                "\n内存页：" + pageSize + " bytes\nPRoot 模式：" +
+                getSharedPreferences("settings", MODE_PRIVATE).getString("proot_mode", "auto") +
+                "\n\n=== 当前状态 ===\n" + tail(getFileStreamPath("runtime-status.txt"), 1024) +
+                "\n\n=== runtime.log ===\n" + tail(getFileStreamPath("runtime.log"), 24000) +
+                "\n\n=== MySQL 启动日志 ===\n" + tail(new File(getFilesDir(), "ubuntu/tmp/mysql-lab.log"), 8000) +
+                "\n\n=== MySQL 初始化日志 ===\n" + tail(new File(getFilesDir(), "ubuntu/tmp/mysql-bootstrap.log"), 8000);
         TextView content = new TextView(this);
         content.setText(log);
         content.setTextSize(12);
@@ -297,12 +334,12 @@ public final class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         String copyText = log;
-        new AlertDialog.Builder(this).setTitle("安装日志")
+        new AlertDialog.Builder(this).setTitle("诊断日志")
                 .setView(scroll)
-                .setPositiveButton("复制日志", (dialog, which) -> {
+                .setPositiveButton("复制诊断", (dialog, which) -> {
                     ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    clipboard.setPrimaryClip(ClipData.newPlainText("MySQL Lab 安装日志", copyText));
-                    Toast.makeText(this, "日志已复制", Toast.LENGTH_SHORT).show();
+                    clipboard.setPrimaryClip(ClipData.newPlainText("MySQL Lab 诊断", copyText));
+                    Toast.makeText(this, "诊断信息已复制", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("关闭", null)
                 .show();

@@ -13,6 +13,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URL;
@@ -50,6 +51,7 @@ final class RuntimeInstaller {
     private final String nodeName;
     private final String nodeSha256;
     private final boolean arm64;
+    private String prootMode = "standard";
     private final List<Process> running = new ArrayList<>();
 
     RuntimeInstaller(Context context) {
@@ -68,34 +70,70 @@ final class RuntimeInstaller {
     }
 
     void start() throws Exception {
+        appendLog("===== MySQL Lab start " + java.time.Instant.now() + " =====");
+        appendLog("Device: " + Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE +
+                ", ABI " + Arrays.toString(Build.SUPPORTED_ABIS));
+        status("正在检查运行环境…");
         if (Build.SUPPORTED_ABIS.length == 0 ||
                 !("arm64-v8a".equals(Build.SUPPORTED_ABIS[0]) || "x86_64".equals(Build.SUPPORTED_ABIS[0]))) {
             status("此设备需要 ARM64 或 x86_64 处理器。");
             return;
         }
         if (!proot.isFile()) throw new IllegalStateException("APK 缺少 ARM64 PRoot 运行文件");
-        installRootfs();
-        updateResolvConf();
-        configureAptSources(context);
-        copySite();
-        if (!new File(files, "installed-v1").isFile()) installPackages();
-        configureRootPassword();
-        status("正在启动 MySQL…");
-        Process mysql = spawn("/usr/sbin/mysqld", "--user=root", "--datadir=/var/lib/mysql",
-                "--socket=/tmp/mysql-lab.sock", "--port=3306", "--bind-address=127.0.0.1",
-                "--skip-name-resolve", "--pid-file=/tmp/mysql-lab.pid", "--log-error=/tmp/mysql-lab.log");
-        running.add(mysql);
-        waitForMysql("/tmp/mysql-lab.sock");
-        runGuest("/usr/bin/mysql", "--protocol=tcp", "--host=127.0.0.1", "-uroot",
-                "--password=" + readText(passwordFile).trim(), "-N", "-B", "-e", "SELECT 1");
-        status("正在启动网页服务…");
-        Process web = spawnWithEnvironment(new String[]{"PORT=3000", "LISTEN_HOST=127.0.0.1",
-                        "MYSQL_HOST=127.0.0.1", "MYSQL_ROOT_PASSWORD=" + readText(passwordFile).trim(),
-                        "NODE_ENV=production"}, "/opt/" + nodeName + "/bin/node", "/opt/mysql-lab/server.js");
-        running.add(web);
-        status("本地服务已启动");
-        int exit = web.waitFor();
-        status("网页服务已退出（代码 " + exit + "）；请重试启动");
+        try {
+            installRootfs();
+            selectProotMode();
+            updateResolvConf();
+            configureAptSources(context);
+            copySite();
+            if (!new File(files, "installed-v1").isFile()) installPackages();
+            configureRootPassword();
+            status("正在启动 MySQL…");
+            Process mysql = spawn("/usr/sbin/mysqld", "--user=root", "--datadir=/var/lib/mysql",
+                    "--socket=/tmp/mysql-lab.sock", "--port=3306", "--bind-address=127.0.0.1",
+                    "--skip-name-resolve", "--pid-file=/tmp/mysql-lab.pid", "--log-error=/tmp/mysql-lab.log");
+            running.add(mysql);
+            waitForMysql("/tmp/mysql-lab.sock", mysql);
+            runGuest("/usr/bin/mysql", "--protocol=tcp", "--host=127.0.0.1", "-uroot",
+                    "--password=" + readText(passwordFile).trim(), "-N", "-B", "-e", "SELECT 1");
+            status("正在启动网页服务…");
+            Process web = spawnWithEnvironment(new String[]{"PORT=3000", "LISTEN_HOST=127.0.0.1",
+                            "MYSQL_HOST=127.0.0.1", "MYSQL_ROOT_PASSWORD=" + readText(passwordFile).trim(),
+                            "NODE_ENV=production"}, "/opt/" + nodeName + "/bin/node", "/opt/mysql-lab/server.js");
+            running.add(web);
+            status("本地服务已启动");
+            int exit = web.waitFor();
+            status("网页服务已退出（代码 " + exit + "）；请重试启动");
+        } finally {
+            for (Process process : running) if (process.isAlive()) process.destroy();
+        }
+    }
+
+    private void selectProotMode() throws Exception {
+        String saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("proot_mode", "auto");
+        String[] candidates = "auto".equals(saved)
+                ? new String[]{"standard", "no_sysvipc", "no_seccomp", "no_sysvipc_no_seccomp"}
+                : new String[]{saved};
+        Exception failure = null;
+        for (String mode : candidates) {
+            if (!Arrays.asList("standard", "no_sysvipc", "no_seccomp", "no_sysvipc_no_seccomp").contains(mode)) continue;
+            prootMode = mode;
+            appendLog("PRoot probe mode: " + mode);
+            try {
+                runGuest("/usr/bin/true");
+                if (new File(rootfs, "usr/bin/mysqladmin").isFile()) runGuest("/usr/bin/mysqladmin", "--version");
+                if (new File(rootfs, "usr/sbin/mysqld").isFile()) runGuest("/usr/sbin/mysqld", "--version");
+                if (new File(rootfs, "opt/" + nodeName + "/bin/node").isFile()) {
+                    runGuest("/opt/" + nodeName + "/bin/node", "--version");
+                }
+                appendLog("PRoot mode selected: " + mode);
+                return;
+            } catch (Exception error) {
+                failure = error;
+                appendLog("PRoot probe failed in " + mode + ": " + error.getMessage());
+            }
+        }
+        throw new IllegalStateException("PRoot 在此设备上无法运行基础命令；请在运行环境设置中尝试兼容模式，并复制诊断日志", failure);
     }
 
     private void installRootfs() throws Exception {
@@ -325,13 +363,18 @@ final class RuntimeInstaller {
         archive.delete();
     }
 
-    private void waitForMysql(String socket) throws Exception {
+    private void waitForMysql(String socket, Process server) throws Exception {
         for (int attempt = 0; attempt < 60; attempt++) {
+            if (!server.isAlive()) throw new IllegalStateException("MySQL 主进程提前退出（代码 " + server.exitValue() + "）；可能是 PRoot 兼容问题，请查看诊断日志并尝试兼容模式");
             Process check = spawn("/usr/bin/mysqladmin", "--protocol=socket", "--socket=" + socket, "ping");
-            if (check.waitFor() == 0) return;
+            int code = check.waitFor();
+            if (code == 0) return;
+            if (code == 139 || code == -11 || recentSignal11()) {
+                throw new IllegalStateException("PRoot 内的 MySQL 检查命令发生 signal 11；请在运行环境设置中切换 PRoot 兼容模式后重试");
+            }
             Thread.sleep(1000);
         }
-        throw new IllegalStateException("MySQL 未能启动；查看 runtime.log 与 Ubuntu /tmp/mysql-lab.log");
+        throw new IllegalStateException("MySQL 超过 60 秒仍未就绪；请复制诊断日志，检查 MySQL 错误日志和 PRoot 兼容模式");
     }
 
     private void configureRootPassword() throws Exception {
@@ -350,7 +393,7 @@ final class RuntimeInstaller {
                 "--skip-grant-tables", "--skip-networking", "--socket=/tmp/mysql-bootstrap.sock",
                 "--pid-file=/tmp/mysql-bootstrap.pid", "--log-error=/tmp/mysql-bootstrap.log");
         try {
-            waitForMysql("/tmp/mysql-bootstrap.sock");
+            waitForMysql("/tmp/mysql-bootstrap.sock", bootstrap);
             runGuest("/usr/bin/mysql", "--protocol=socket", "--socket=/tmp/mysql-bootstrap.sock", "-uroot", "-e",
                     "FLUSH PRIVILEGES; " +
                     "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '" + password + "'; " +
@@ -375,13 +418,16 @@ final class RuntimeInstaller {
     private Process spawnWithEnvironment(String[] extraEnvironment, String... command) throws Exception {
         List<String> args = new ArrayList<>();
         args.add(proot.getAbsolutePath());
-        args.addAll(Arrays.asList("-0", "-L", "--link2symlink", "--sysvipc", "-r", rootfs.getAbsolutePath(), "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root"));
+        args.addAll(Arrays.asList("-0", "-L", "--link2symlink"));
+        if (!prootMode.contains("no_sysvipc")) args.add("--sysvipc");
+        args.addAll(Arrays.asList("-r", rootfs.getAbsolutePath(), "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root"));
         args.add("/usr/bin/env"); args.add("-i");
         args.addAll(Arrays.asList("HOME=/root", "PATH=/opt/" + nodeName + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"));
         args.addAll(Arrays.asList(extraEnvironment));
         args.addAll(Arrays.asList(command));
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.environment().put("LD_LIBRARY_PATH", context.getApplicationInfo().nativeLibraryDir);
+        if (prootMode.contains("no_seccomp")) builder.environment().put("PROOT_NO_SECCOMP", "1");
         File prootTmp = new File(files, "proot-tmp");
         if (!prootTmp.isDirectory() && !prootTmp.mkdirs()) throw new IllegalStateException("无法创建 PRoot 临时目录");
         builder.environment().put("PROOT_TMP_DIR", prootTmp.getAbsolutePath());
@@ -390,6 +436,7 @@ final class RuntimeInstaller {
         File links = new File(rootfs, ".l2s");
         if (!links.isDirectory() && !links.mkdirs()) throw new IllegalStateException("无法创建 PRoot 链接目录");
         builder.environment().put("PROOT_L2S_DIR", links.getAbsolutePath());
+        appendLog("Guest start [" + prootMode + "]: " + command[0]);
         builder.redirectErrorStream(true);
         Process process = builder.start();
         new Thread(() -> {
@@ -410,7 +457,12 @@ final class RuntimeInstaller {
     private void runGuest(String... command) throws Exception {
         Process process = spawn(command);
         int code = process.waitFor();
-        if (code != 0) throw new IllegalStateException(command[0] + " 退出代码 " + code + "；详见 runtime.log");
+        if (code != 0) {
+            appendLog("Guest exit: " + command[0] + " code=" + code);
+            String reason = (code == 139 || code == -11 || recentSignal11())
+                    ? "（signal 11，可能需要切换 PRoot 兼容模式）" : "";
+            throw new IllegalStateException(command[0] + " 退出代码 " + code + reason + "；详见诊断日志");
+        }
     }
 
     private void runHost(String... command) throws Exception {
@@ -421,6 +473,27 @@ final class RuntimeInstaller {
 
     private void status(String message) throws Exception {
         writeText(statusFile, message);
+        appendLog("Stage: " + message);
+    }
+
+    private void appendLog(String line) throws Exception {
+        synchronized (logFile) {
+            try (FileOutputStream output = new FileOutputStream(logFile, true)) {
+                output.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    private boolean recentSignal11() {
+        try (RandomAccessFile input = new RandomAccessFile(logFile, "r")) {
+            long start = Math.max(0, input.length() - 2048);
+            input.seek(start);
+            byte[] bytes = new byte[(int) (input.length() - start)];
+            input.readFully(bytes);
+            String tail = new String(bytes, StandardCharsets.UTF_8);
+            int marker = tail.lastIndexOf("Guest start [");
+            return marker >= 0 && tail.substring(marker).contains("terminated with signal 11");
+        } catch (Exception ignored) { return false; }
     }
 
     private static void writeText(File file, String value) throws Exception {
