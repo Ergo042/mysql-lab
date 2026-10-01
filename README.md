@@ -117,7 +117,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 离线 ARM64 包的构建方式见 [prebuilt/README.md](prebuilt/README.md)。仓库的 `Build offline ARM64 APK` GitHub Actions 工作流使用 ARM64 Ubuntu 虚拟机预装环境，再把环境嵌入 APK。Android CLI 可管理 SDK、模拟器和安装 APK；在 x86_64 Windows 主机上运行 ARM64 Android 模拟器无法使用虚拟化加速，因此 ARM64 环境构建放在 ARM64 虚拟机中。
 
-已在 Android 14 的 Pixel 8 x86_64 模拟器中验证 APK 安装、首次初始化、创建练习空间、执行 `SELECT VERSION()`（返回 MySQL 8.0.46）和重启后读取原练习空间。也已在 Android 16 的 ARM64 真机上验证首次初始化、网页界面、创建练习空间，以及通过应用后端执行 `SELECT VERSION()`（返回 MySQL 8.0.46）。真机使用系统当前网络提供的 DNS 完成 Ubuntu 软件包安装。PRoot 和依赖库的来源及许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+已在 Android 14 的 Pixel 8 x86_64 模拟器中验证 APK 安装、首次初始化、创建练习空间、执行 `SELECT VERSION()`（返回 MySQL 8.0.46）和重启后读取原练习空间。也已在 Android 16 的 ARM64 真机上验证在线安装、网页界面、创建练习空间，以及通过应用后端执行 `SELECT VERSION()`（返回 MySQL 8.0.46）。离线 ARM64 构建已在 Android 16 真机上验证首次解压、MySQL 连接检查、网页显示和 `/api/health` 返回 200。PRoot 和依赖库的来源及许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。
 
 ## 开源协议
 

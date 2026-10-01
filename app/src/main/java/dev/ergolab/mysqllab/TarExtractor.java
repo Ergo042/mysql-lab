@@ -8,6 +8,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
@@ -49,9 +50,10 @@ final class TarExtractor {
                 longLink = null;
                 pax.clear();
                 if (name.startsWith("/") || name.contains("../")) throw new IllegalStateException("tar 包含不安全路径：" + name);
-                File target = new File(root, name).toPath().toAbsolutePath().normalize().toFile();
-                String rootPath = root.toPath().toAbsolutePath().normalize().toString() + File.separator;
-                if (!target.getPath().startsWith(rootPath)) throw new IllegalStateException("tar 路径越界：" + name);
+                Path rootPath = root.toPath().toAbsolutePath().normalize();
+                Path targetPath = rootPath.resolve(name).normalize();
+                if (!targetPath.startsWith(rootPath)) throw new IllegalStateException("tar 路径越界：" + name);
+                File target = targetPath.toFile();
                 File parent = target.getParentFile();
                 if (!parent.isDirectory() && !parent.mkdirs()) throw new IllegalStateException("无法创建目录：" + parent);
                 if (type == '5') {
@@ -62,8 +64,9 @@ final class TarExtractor {
                     Os.symlink(link, target.getAbsolutePath());
                 } else if (type == '1') {
                     Files.deleteIfExists(target.toPath());
-                    File source = new File(root, link).toPath().toAbsolutePath().normalize().toFile();
-                    if (!source.getPath().startsWith(rootPath)) throw new IllegalStateException("tar 硬链接越界：" + link);
+                    Path sourcePath = rootPath.resolve(link).normalize();
+                    if (!sourcePath.startsWith(rootPath)) throw new IllegalStateException("tar 硬链接越界：" + link);
+                    File source = sourcePath.toFile();
                     // Android's app sandbox may deny hard links. A relative
                     // symlink preserves the guest-visible path in PRoot.
                     String relative = target.getParentFile().toPath().relativize(source.toPath()).toString();

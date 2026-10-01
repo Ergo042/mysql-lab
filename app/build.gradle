@@ -12,8 +12,8 @@ android {
         // PRoot runs Linux ELF files from the app's private data directory.
         // Android 10's W^X restriction blocks that for targetSdk >= 29.
         targetSdk 28
-        versionCode 5
-        versionName '0.3.0'
+        versionCode 6
+        versionName '0.3.1'
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
     }
 
